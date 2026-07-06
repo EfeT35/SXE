@@ -18,6 +18,11 @@ local UIS = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- Certains executors n'exposent pas la librairie "task" -> on retombe sur
+-- les globales historiques spawn/wait pour rester compatible partout.
+local safeSpawn = (task and task.spawn) or spawn
+local safeWait = (task and task.wait) or wait
+
 local function create(className, props)
     local inst = Instance.new(className)
     for key, value in pairs(props) do
@@ -144,6 +149,8 @@ toggleButton.MouseButton1Click:Connect(function()
     phoneFrame.Visible = not phoneFrame.Visible
 end)
 
+local buildOk, buildErr = pcall(function()
+
 --------------------------------------------------------------------------
 -- Ecran d'accueil
 --------------------------------------------------------------------------
@@ -176,10 +183,10 @@ local clockLabel = create("TextLabel", {
     Parent = homeScreen,
 })
 
-task.spawn(function()
+safeSpawn(function()
     while screenGui.Parent do
         clockLabel.Text = safeClockText()
-        task.wait(15)
+        safeWait(15)
     end
 end)
 
@@ -737,9 +744,9 @@ function SnakeApp.Init(container, scoreLabel)
 
     reset()
 
-    task.spawn(function()
+    safeSpawn(function()
         while running do
-            task.wait(MOVE_INTERVAL)
+            safeWait(MOVE_INTERVAL)
             if not running or dead then continue end
 
             direction = nextDirection
@@ -1074,3 +1081,9 @@ table.insert(Apps, Game2048)
 --------------------------------------------------------------------------
 
 buildHomeScreen()
+
+end)
+
+if not buildOk then
+    warn("[Phone] Erreur au chargement, ecran vide en consequence: " .. tostring(buildErr))
+end
