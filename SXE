@@ -3640,7 +3640,18 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
             if sourceModel then
                 local modelClone = sourceModel:Clone()
                 modelClone.Parent = worldModel
-                
+
+                -- A WorldModel still simulates physics: an unanchored clone falls out of
+                -- camera view within the first frame, which is why nothing ever showed.
+                for _, part in ipairs(modelClone:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.Anchored = true
+                        part.CanCollide = false
+                        part.CastShadow = false
+                        part.LocalTransparencyModifier = 0
+                    end
+                end
+
                 local cframe, size = modelClone:GetBoundingBox()
                 local maxAxis = math.max(size.X, size.Y, size.Z)
                 
