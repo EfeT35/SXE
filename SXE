@@ -3703,7 +3703,7 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
     end)
 end
 
-local lastAlertedPriorityUID = nil
+local alertedPrioritySignatures = {}
 local fallbackAlertShown = false
 
 task.spawn(function()
@@ -3716,7 +3716,8 @@ task.spawn(function()
             local myName = LocalPlayer.Name
             local myDisplay = LocalPlayer.DisplayName
 
-            local bestPet, bestPriorityIndex = nil, nil
+            local newPriorityPet = nil -- first not-yet-alerted priority brainrot found this cycle
+            local anyPriorityPetOnMap = false
             local bestFallbackPet = nil -- cache is sorted by genValue desc, so first non-owned = best available
 
             for _, pet in ipairs(cache) do
@@ -3725,32 +3726,35 @@ task.spawn(function()
                         bestFallbackPet = pet
                     end
 
-                    local priorityIndex = nil
-                    for idx, pName in ipairs(priorityList) do
+                    local isPriority = false
+                    for _, pName in ipairs(priorityList) do
                         if pName:lower() == pet.name:lower() then
-                            priorityIndex = idx
+                            isPriority = true
                             break
                         end
                     end
 
-                    if priorityIndex and (not bestPriorityIndex or priorityIndex < bestPriorityIndex) then
-                        bestPriorityIndex = priorityIndex
-                        bestPet = pet
+                    if isPriority then
+                        anyPriorityPetOnMap = true
+                        if not newPriorityPet then
+                            -- uid is the plot+slot position, not the animal instance -- a new
+                            -- spawn (e.g. a player who just joined) can reuse an old slot, so
+                            -- dedupe on name+mutation too, not just uid.
+                            local sig = pet.uid .. "|" .. pet.name .. "|" .. tostring(pet.mutation)
+                            if not alertedPrioritySignatures[sig] then
+                                alertedPrioritySignatures[sig] = true
+                                newPriorityPet = pet
+                            end
+                        end
                     end
                 end
             end
 
-            -- uid is the plot+slot position, not the animal instance -- a new spawn can
-            -- reuse the same slot as the last one alerted, so dedupe on name+mutation
-            -- too, otherwise a genuinely new priority brainrot in an old slot never re-alerts.
-            local bestPetSignature = bestPet and (bestPet.uid .. "|" .. bestPet.name .. "|" .. tostring(bestPet.mutation))
-
-            if bestPet and bestPetSignature ~= lastAlertedPriorityUID then
-                -- A good (priority-list) brainrot: re-alert every time a new one shows up,
-                -- regardless of whether it's higher/lower priority than the last one shown.
-                lastAlertedPriorityUID = bestPetSignature
-                ShowPriorityAlertImpl(bestPet.name, bestPet.genText, bestPet.mutation, bestPet.owner)
-            elseif not bestPet and bestFallbackPet and not fallbackAlertShown then
+            if newPriorityPet then
+                -- A good (priority-list) brainrot nobody's been alerted about yet -- always
+                -- show it, even if a higher-priority one is already on screen/on the map.
+                ShowPriorityAlertImpl(newPriorityPet.name, newPriorityPet.genText, newPriorityPet.mutation, newPriorityPet.owner)
+            elseif not anyPriorityPetOnMap and bestFallbackPet and not fallbackAlertShown then
                 -- Nothing matches the priority list: alert once on the best one available, never again.
                 fallbackAlertShown = true
                 ShowPriorityAlertImpl(bestFallbackPet.name, bestFallbackPet.genText, bestFallbackPet.mutation, bestFallbackPet.owner)
