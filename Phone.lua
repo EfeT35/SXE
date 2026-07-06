@@ -51,7 +51,6 @@ local screenGui = create("ScreenGui", {
     Name = "PhoneGui",
     ResetOnSpawn = false,
     IgnoreGuiInset = true,
-    ZIndexBehavior = Enum.ZIndexBehavior.Global,
     DisplayOrder = 50,
     Parent = PlayerGui,
 })
