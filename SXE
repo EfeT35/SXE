@@ -1927,7 +1927,6 @@ local function startWalkFling()
         for _,p in ipairs(Players:GetPlayers()) do if p~=player and p.Character then for _,pt in ipairs(p.Character:GetChildren()) do if pt:IsA("BasePart") then pt.CanCollide=false end end end end
     end))
     local co=coroutine.create(function()
-        if _G.invisibleStealEnabled then rr.CFrame=rr.CFrame*CFrame.new(0,3,0) end
         while _wfActive do RunService.Heartbeat:Wait(); if not rr or not rr.Parent then break end
             local v=rr.Velocity; rr.Velocity=v*10000+Vector3.new(0,10000,0)
             RunService.RenderStepped:Wait(); if rr then rr.Velocity=v end
@@ -1935,7 +1934,18 @@ local function startWalkFling()
         end
     end); coroutine.resume(co); table.insert(_wfConns,co)
 end
-local function runDropBrainrot() if _wfActive then return end; startWalkFling(); task.delay(0.4,stopWalkFling) end
+local function runDropBrainrot()
+    if _wfActive then return end
+    if _G.invisibleStealEnabled and _G.toggleInvisibleSteal then
+        -- Drop the disguise first: the real HumanoidRootPart is parented to the
+        -- camera while invisible steal is on, so flinging while it's active
+        -- doesn't move the actual character.
+        pcall(_G.toggleInvisibleSteal)
+        task.wait(0.1)
+    end
+    startWalkFling()
+    task.delay(0.4, stopWalkFling)
+end
 
 -- ============================================================
 -- INVISIBLE STEAL
