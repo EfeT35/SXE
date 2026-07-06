@@ -3638,7 +3638,20 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
             end
             
             if sourceModel then
-                local modelClone = sourceModel:Clone()
+                -- Some model templates are marked Archivable = false to block cloning --
+                -- :Clone() then silently returns nil and everything below would error out,
+                -- aborting the coroutine with nothing ever rendered. Flip it on just long
+                -- enough to clone, then restore it.
+                local wasArchivable = sourceModel.Archivable
+                if not wasArchivable then
+                    pcall(function() sourceModel.Archivable = true end)
+                end
+                local cloneOk, modelClone = pcall(function() return sourceModel:Clone() end)
+                if not wasArchivable then
+                    pcall(function() sourceModel.Archivable = wasArchivable end)
+                end
+
+            if cloneOk and modelClone then
                 modelClone.Parent = worldModel
 
                 -- A WorldModel still simulates physics: an unanchored clone falls out of
@@ -3693,9 +3706,10 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
                     end
                 end
             end
+            end
         end
     end)
-    
+
     local titleLabel = Instance.new("TextLabel", alertFrame)
     titleLabel.Size = UDim2.new(1, -85, 0, 20)
     titleLabel.Position = UDim2.new(0, 76, 0, 12)
