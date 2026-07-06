@@ -3501,7 +3501,7 @@ end
 -- ============================================================
 -- PRIORITY ALERT (SXE Styled 3D Viewer with Sorting Queue)
 -- ============================================================
-local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsername)
+local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsername, brainrotIndex)
     local normalizedMutation = mutation and mutation:gsub("%s+", ""):lower() or ""
     
     local mutationColors = {
@@ -3607,10 +3607,15 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
         local animationsFolder = ReplicatedStorage:FindFirstChild("Animations") and ReplicatedStorage.Animations:FindFirstChild("Animals")
         
         if modelsFolder and brainrotName then
-            local sourceModel = modelsFolder:FindFirstChild(brainrotName)
+            -- The models folder is keyed by the animal's internal index (e.g. "ketupat-bros"),
+            -- not its display name (e.g. "Ketupat Bros"), so try the index first.
+            local sourceModel = brainrotIndex and modelsFolder:FindFirstChild(brainrotIndex)
+            if not sourceModel then
+                sourceModel = modelsFolder:FindFirstChild(brainrotName)
+            end
             if not sourceModel then
                 for _, child in pairs(modelsFolder:GetChildren()) do
-                    if child.Name:lower() == brainrotName:lower() then
+                    if child.Name:lower() == brainrotName:lower() or (brainrotIndex and child.Name:lower() == brainrotIndex:lower()) then
                         sourceModel = child
                         break
                     end
@@ -3763,11 +3768,11 @@ task.spawn(function()
             if newPriorityPet then
                 -- A good (priority-list) brainrot nobody's been alerted about yet -- always
                 -- show it, even if a higher-priority one is already on screen/on the map.
-                ShowPriorityAlertImpl(newPriorityPet.name, newPriorityPet.genText, newPriorityPet.mutation, newPriorityPet.owner)
+                ShowPriorityAlertImpl(newPriorityPet.name, newPriorityPet.genText, newPriorityPet.mutation, newPriorityPet.owner, newPriorityPet.index)
             elseif not anyPriorityPetOnMap and bestFallbackPet and not fallbackAlertShown then
                 -- Nothing matches the priority list: alert once on the best one available, never again.
                 fallbackAlertShown = true
-                ShowPriorityAlertImpl(bestFallbackPet.name, bestFallbackPet.genText, bestFallbackPet.mutation, bestFallbackPet.owner)
+                ShowPriorityAlertImpl(bestFallbackPet.name, bestFallbackPet.genText, bestFallbackPet.mutation, bestFallbackPet.owner, bestFallbackPet.index)
             end
         end)
     end
