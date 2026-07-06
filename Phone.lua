@@ -237,6 +237,26 @@ create("UIGridLayout", {
     Parent = iconHolder,
 })
 
+create("Frame", {
+    Name = "DebugMarkerPink",
+    Size = UDim2.fromOffset(80, 80),
+    BackgroundColor3 = Color3.fromRGB(255, 0, 170),
+    ZIndex = 50,
+    Parent = iconHolder,
+})
+create("TextButton", {
+    Name = "DebugMarkerButton",
+    Size = UDim2.fromOffset(80, 80),
+    Position = UDim2.fromOffset(0, 100),
+    BackgroundColor3 = Color3.fromRGB(0, 170, 255),
+    Text = "X",
+    TextSize = 30,
+    TextColor3 = Color3.fromRGB(0, 0, 0),
+    Font = Enum.Font.SourceSans,
+    ZIndex = 50,
+    Parent = iconHolder,
+})
+
 --------------------------------------------------------------------------
 -- Ecran d'une appli (topbar + zone de contenu)
 --------------------------------------------------------------------------
