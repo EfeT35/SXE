@@ -69,7 +69,7 @@ end
 local function messageOverlay(content, zBase)
 	zBase = zBase or 90
 	local overlay = frame(content, UDim2.new(1, 0, 1, 0), UDim2.new(0, 0, 0, 0), Color3.fromRGB(0, 0, 0), zBase)
-	overlay.BackgroundTransparency = 0.35
+	overlay.BackgroundTransparency = 0.6
 
 	local card = frame(overlay, UDim2.new(0, 220, 0, 170), UDim2.new(0.5, -110, 0.5, -85), Color3.fromRGB(255, 255, 255), zBase + 1)
 	corner(card, UDim.new(0, 14))
@@ -256,8 +256,8 @@ local function buildFlappyBird(content)
 
 	local GROUND_H = 60
 	local PLAYABLE_H = GAME_H - GROUND_H
-	local GRAVITY, FLAP = 900, -280
-	local PW, PGAP, PSPEED, PSPACE = 46, 120, 110, 160
+	local GRAVITY, FLAP = 750, -260
+	local PW, PGAP, PSPEED, PSPACE = 46, 130, 100, 170
 	local BX, BR = 60, 13
 
 	local function makeCloud(x, y, scale)
@@ -288,6 +288,7 @@ local function buildFlappyBird(content)
 
 	local state = "start"
 	local birdY, birdVel, score = PLAYABLE_H / 2, 0, 0
+	local hasFlapped = false
 	local pipes = {}
 
 	local function clearPipes()
@@ -326,6 +327,7 @@ local function buildFlappyBird(content)
 	local function resetGame()
 		clearPipes()
 		birdY, birdVel, score = PLAYABLE_H / 2, 0, 0
+		hasFlapped = false
 		scoreLabel.Text = "0"
 		bird.Position = UDim2.new(0, BX, 0, birdY)
 		bird.Rotation = 0
@@ -349,17 +351,22 @@ local function buildFlappyBird(content)
 
 	table.insert(conns, ovBtn.MouseButton1Click:Connect(startGame))
 
+	local function flap()
+		hasFlapped = true
+		birdVel = FLAP
+	end
+
 	table.insert(conns, content.InputBegan:Connect(function(input, processed)
 		if processed then return end
 		if state == "playing" and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-			birdVel = FLAP
+			flap()
 		end
 	end))
 
 	table.insert(conns, UserInputService.InputBegan:Connect(function(input, processed)
 		if processed then return end
 		if state == "playing" and input.KeyCode == Enum.KeyCode.Space then
-			birdVel = FLAP
+			flap()
 		end
 	end))
 
@@ -372,8 +379,12 @@ local function buildFlappyBird(content)
 
 		if state ~= "playing" then return end
 
-		birdVel += GRAVITY * dt
-		birdY += birdVel * dt
+		if hasFlapped then
+			birdVel += GRAVITY * dt
+			birdY += birdVel * dt
+		else
+			birdY = PLAYABLE_H / 2 + math.sin(os.clock() * 4) * 6
+		end
 		if birdY - BR < 0 then
 			birdY = BR
 			birdVel = 0
