@@ -19,6 +19,12 @@ local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- Enleve toute copie laissee par une execution precedente du script.
+local existingPhoneGui = PlayerGui:FindFirstChild("PhoneGui")
+if existingPhoneGui then
+    existingPhoneGui:Destroy()
+end
+
 -- Certains executors n'exposent pas la librairie "task" -> on retombe sur
 -- les globales historiques spawn/wait pour rester compatible partout.
 local safeSpawn = (task and task.spawn) or spawn
@@ -189,6 +195,15 @@ local homeScreen = create("Frame", {
     Size = UDim2.fromScale(1, 1),
     BackgroundTransparency = 1,
     Parent = screenFrame,
+})
+
+create("Frame", {
+    Name = "DebugMarkerOrange",
+    Size = UDim2.fromOffset(100, 100),
+    Position = UDim2.fromOffset(150, 20),
+    BackgroundColor3 = Color3.fromRGB(255, 140, 0),
+    ZIndex = 50,
+    Parent = homeScreen,
 })
 
 local clockLabel = create("TextLabel", {
