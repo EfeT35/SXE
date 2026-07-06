@@ -84,7 +84,7 @@ end
 
 --============ Téléphone ============--
 
-local PHONE_W, PHONE_H = 320, 660
+local PHONE_W, PHONE_H = 400, 800
 local BEZEL = 12
 local STATUSBAR_H = 26
 
@@ -204,7 +204,13 @@ local function openApp(app)
 	topZ += 1
 	win.ZIndex = topZ
 
-	local titlebar = frame(win, UDim2.new(1, 0, 0, TITLEBAR_H), UDim2.new(0, 0, 0, 0), Color3.fromRGB(20, 20, 26), 41)
+	local winStroke = Instance.new("UIStroke")
+	winStroke.Color = Color3.fromRGB(255, 255, 255)
+	winStroke.Transparency = 0.7
+	winStroke.Thickness = 1.5
+	winStroke.Parent = win
+
+	local titlebar = frame(win, UDim2.new(1, 0, 0, TITLEBAR_H), UDim2.new(0, 0, 0, 0), Color3.fromRGB(45, 45, 55), 41)
 	titlebar.Active = true
 
 	local dot = frame(titlebar, UDim2.new(0, 8, 0, 8), UDim2.new(0, 10, 0.5, -4), app.color, 42)
@@ -219,7 +225,18 @@ local function openApp(app)
 	content.ClipsDescendants = true
 
 	local dragConns = makeDraggable(titlebar, win)
-	local gameConns = app.build(content) or {}
+
+	local gameConns
+	local ok, result = pcall(app.build, content)
+	if ok then
+		gameConns = result or {}
+	else
+		warn("[PhoneArcade] " .. app.name .. " a planté : " .. tostring(result))
+		content.BackgroundColor3 = Color3.fromRGB(40, 20, 20)
+		local errLabel = label(content, UDim2.new(1, -20, 1, -20), UDim2.new(0, 10, 0, 10), "Erreur dans " .. app.name .. " :\n" .. tostring(result), 13, Color3.fromRGB(255, 140, 140), true, 50)
+		errLabel.TextWrapped = true
+		gameConns = {}
+	end
 
 	local allConns = {}
 	for _, c in ipairs(dragConns) do table.insert(allConns, c) end
@@ -1050,11 +1067,11 @@ end
 --============ Écran d'accueil ============--
 
 local apps = {
-	{ name = "Flappy Bird", emoji = "🐦", color = Color3.fromRGB(247, 202, 24), build = buildFlappyBird },
-	{ name = "Snake", emoji = "🐍", color = Color3.fromRGB(46, 204, 113), build = buildSnake },
-	{ name = "Pong", emoji = "🏓", color = Color3.fromRGB(52, 152, 219), build = buildPong },
-	{ name = "Casse-briques", emoji = "🧱", color = Color3.fromRGB(230, 126, 34), build = buildBreakout },
-	{ name = "2048", emoji = "🔢", color = Color3.fromRGB(155, 89, 182), build = build2048 },
+	{ name = "Flappy Bird", badge = "FB", color = Color3.fromRGB(247, 202, 24), build = buildFlappyBird },
+	{ name = "Snake", badge = "SN", color = Color3.fromRGB(46, 204, 113), build = buildSnake },
+	{ name = "Pong", badge = "PG", color = Color3.fromRGB(52, 152, 219), build = buildPong },
+	{ name = "Casse-briques", badge = "CB", color = Color3.fromRGB(230, 126, 34), build = buildBreakout },
+	{ name = "2048", badge = "2048", color = Color3.fromRGB(155, 89, 182), build = build2048 },
 }
 
 for _, app in ipairs(apps) do
@@ -1066,9 +1083,10 @@ for _, app in ipairs(apps) do
 	iconBtn.Size = UDim2.new(0, 64, 0, 64)
 	iconBtn.Position = UDim2.new(0.5, -32, 0, 0)
 	iconBtn.BackgroundColor3 = app.color
-	iconBtn.Text = app.emoji
-	iconBtn.TextSize = 30
+	iconBtn.Text = app.badge
+	iconBtn.TextSize = app.badge == "2048" and 18 or 22
 	iconBtn.Font = Enum.Font.GothamBold
+	iconBtn.TextColor3 = Color3.fromRGB(30, 30, 30)
 	iconBtn.Parent = icon
 	corner(iconBtn, UDim.new(0, 16))
 
