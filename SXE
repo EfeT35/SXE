@@ -3621,6 +3621,21 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
                     end
                 end
             end
+            if not sourceModel then
+                -- Last resort: fuzzy substring match, ignoring spaces/case, in case the
+                -- model name isn't an exact match for either the index or display name
+                -- (e.g. "Ketupat-Bros" vs "Ketupat Bros").
+                local searchName = brainrotName:lower():gsub("%s+", "")
+                local searchIndex = brainrotIndex and brainrotIndex:lower():gsub("%s+", "")
+                for _, child in pairs(modelsFolder:GetChildren()) do
+                    local nl = child.Name:lower():gsub("%s+", "")
+                    if nl:find(searchName, 1, true) or searchName:find(nl, 1, true)
+                        or (searchIndex and (nl:find(searchIndex, 1, true) or searchIndex:find(nl, 1, true))) then
+                        sourceModel = child
+                        break
+                    end
+                end
+            end
             
             if sourceModel then
                 local modelClone = sourceModel:Clone()
