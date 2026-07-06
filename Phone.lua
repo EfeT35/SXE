@@ -148,6 +148,16 @@ end)
 -- Ecran d'accueil
 --------------------------------------------------------------------------
 
+local function safeClockText()
+    local ok, result = pcall(function()
+        return os.date("%H:%M")
+    end)
+    if ok then
+        return result
+    end
+    return "--:--"
+end
+
 local homeScreen = create("Frame", {
     Name = "HomeScreen",
     Size = UDim2.fromScale(1, 1),
@@ -162,13 +172,13 @@ local clockLabel = create("TextLabel", {
     Font = Enum.Font.GothamBold,
     TextSize = 26,
     TextColor3 = Color3.fromRGB(255, 255, 255),
-    Text = os.date("%H:%M"),
+    Text = safeClockText(),
     Parent = homeScreen,
 })
 
 task.spawn(function()
     while screenGui.Parent do
-        clockLabel.Text = os.date("%H:%M")
+        clockLabel.Text = safeClockText()
         task.wait(15)
     end
 end)
