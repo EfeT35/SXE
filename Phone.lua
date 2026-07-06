@@ -14,6 +14,7 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UIS = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -50,6 +51,7 @@ local screenGui = create("ScreenGui", {
     Name = "PhoneGui",
     ResetOnSpawn = false,
     IgnoreGuiInset = true,
+    ZIndexBehavior = Enum.ZIndexBehavior.Global,
     DisplayOrder = 50,
     Parent = PlayerGui,
 })
@@ -81,6 +83,24 @@ local phoneFrame = create("Frame", {
 })
 create("UICorner", { CornerRadius = UDim.new(0, 34), Parent = phoneFrame })
 create("UIStroke", { Color = Color3.fromRGB(60, 60, 65), Thickness = 2, Parent = phoneFrame })
+
+local phoneScale = create("UIScale", { Parent = phoneFrame })
+
+local function updatePhoneScale()
+    local camera = workspace.CurrentCamera
+    if not camera then return end
+    local viewport = camera.ViewportSize
+    local scale = math.min((viewport.Y * 0.92) / PHONE_H, (viewport.X * 0.92) / PHONE_W)
+    phoneScale.Scale = math.clamp(scale, 0.5, 1.4)
+end
+updatePhoneScale()
+do
+    local cam = workspace.CurrentCamera
+    if cam then
+        cam:GetPropertyChangedSignal("ViewportSize"):Connect(updatePhoneScale)
+    end
+    workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(updatePhoneScale)
+end
 
 local dragHandle = create("Frame", {
     Name = "DragHandle",
@@ -387,34 +407,49 @@ end
 -- Appli 1 : Flappy Bird
 --------------------------------------------------------------------------
 
-local FlappyBird = { Name = "Flappy", Icon = "\240\159\144\166", Color = Color3.fromRGB(80, 170, 235) }
+local FlappyBird = { Name = "Flappy", Icon = "\240\159\144\166", Color = Color3.fromRGB(80, 170, 235), Best = 0 }
 
 function FlappyBird.Init(container, scoreLabel)
     local GRAVITY = 900
-    local JUMP_VELOCITY = -320
-    local BIRD_SIZE = 26
-    local BIRD_X = 50
-    local PIPE_WIDTH = 46
-    local PIPE_GAP = 150
+    local FLAP_IMPULSE = -300
+    local PIPE_WIDTH = 44
+    local PIPE_GAP = 145
     local PIPE_SPEED = 130
-    local SPAWN_INTERVAL = 1.6
+    local PIPE_SPACING = 190
+    local GROUND_HEIGHT = 30
+    local PLAYABLE_HEIGHT = CONTENT_H - GROUND_HEIGHT
+    local BIRD_X, BIRD_RADIUS = 46, 13
 
     local conns = {}
     local pipes = {}
-    local velocity = 0
-    local birdY = CONTENT_H / 2
-    local dead = false
+    local birdY, birdVel = PLAYABLE_HEIGHT / 2, 0
     local score = 0
-    local spawnTimer = 0
+    local gameState = "start" -- start | playing | gameover
+    local idleTween
+
+    create("Frame", {
+        Size = UDim2.new(1, 0, 0, GROUND_HEIGHT),
+        Position = UDim2.new(0, 0, 1, -GROUND_HEIGHT),
+        BackgroundColor3 = Color3.fromRGB(222, 184, 111),
+        ZIndex = 3,
+        Parent = container,
+    })
 
     local bird = create("Frame", {
-        Size = UDim2.fromOffset(BIRD_SIZE, BIRD_SIZE),
-        Position = UDim2.fromOffset(BIRD_X, birdY),
-        BackgroundColor3 = Color3.fromRGB(255, 210, 60),
-        ZIndex = 2,
+        Size = UDim2.fromOffset(BIRD_RADIUS * 2, BIRD_RADIUS * 2),
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        BackgroundColor3 = Color3.fromRGB(247, 202, 24),
+        ZIndex = 4,
         Parent = container,
     })
     create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = bird })
+    create("Frame", {
+        Size = UDim2.fromOffset(10, 6),
+        Position = UDim2.new(1, -4, 0.5, -3),
+        BackgroundColor3 = Color3.fromRGB(235, 140, 52),
+        ZIndex = 5,
+        Parent = bird,
+    })
 
     local flapButton = create("TextButton", {
         Size = UDim2.fromScale(1, 1),
@@ -424,23 +459,53 @@ function FlappyBird.Init(container, scoreLabel)
         Parent = container,
     })
 
-    local overlay = create("Frame", {
-        Size = UDim2.fromScale(1, 1),
-        BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-        BackgroundTransparency = 0.4,
-        Visible = false,
-        ZIndex = 5,
-        Parent = container,
+    local function createOverlay()
+        return create("Frame", {
+            Size = UDim2.fromScale(1, 1),
+            BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+            BackgroundTransparency = 0.35,
+            Visible = false,
+            ZIndex = 6,
+            Parent = container,
+        })
+    end
+
+    local startOverlay = createOverlay()
+    startOverlay.Visible = true
+    create("TextLabel", {
+        Size = UDim2.new(1, -20, 0, 40),
+        Position = UDim2.new(0, 10, 0.3, 0),
+        BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold,
+        TextSize = 22,
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        Text = "Flappy Bird",
+        ZIndex = 7,
+        Parent = startOverlay,
     })
+    local startButton = create("TextButton", {
+        Size = UDim2.fromOffset(140, 44),
+        Position = UDim2.new(0.5, -70, 0.5, 0),
+        BackgroundColor3 = Color3.fromRGB(94, 201, 98),
+        Font = Enum.Font.GothamBold,
+        TextSize = 18,
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        Text = "Jouer",
+        ZIndex = 7,
+        Parent = startOverlay,
+    })
+    create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = startButton })
+
+    local overlay = createOverlay()
     local overlayLabel = create("TextLabel", {
         Size = UDim2.new(1, 0, 0, 60),
-        Position = UDim2.new(0, 0, 0.3, 0),
+        Position = UDim2.new(0, 0, 0.28, 0),
         BackgroundTransparency = 1,
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Font = Enum.Font.GothamBold,
-        TextSize = 26,
-        Text = "Game Over",
-        ZIndex = 6,
+        TextSize = 22,
+        Text = "Perdu !",
+        ZIndex = 7,
         Parent = overlay,
     })
     local restartButton = create("TextButton", {
@@ -451,10 +516,30 @@ function FlappyBird.Init(container, scoreLabel)
         TextSize = 18,
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Text = "Rejouer",
-        ZIndex = 6,
+        ZIndex = 7,
         Parent = overlay,
     })
     create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = restartButton })
+
+    local function configurePipe(pipe, x)
+        local gapCenter = math.random(70, math.max(71, PLAYABLE_HEIGHT - 70))
+        local topHeight = gapCenter - PIPE_GAP / 2
+        local bottomY = gapCenter + PIPE_GAP / 2
+        pipe.x = x
+        pipe.gapTop = topHeight
+        pipe.gapBottom = bottomY
+        pipe.scored = false
+        pipe.top.Size = UDim2.fromOffset(PIPE_WIDTH, topHeight)
+        pipe.top.Position = UDim2.fromOffset(x, 0)
+        pipe.bottom.Size = UDim2.fromOffset(PIPE_WIDTH, PLAYABLE_HEIGHT - bottomY)
+        pipe.bottom.Position = UDim2.fromOffset(x, bottomY)
+    end
+
+    local function createPipe()
+        local top = create("Frame", { BackgroundColor3 = Color3.fromRGB(94, 201, 98), ZIndex = 2, Parent = container })
+        local bottom = create("Frame", { BackgroundColor3 = Color3.fromRGB(94, 201, 98), ZIndex = 2, Parent = container })
+        return { top = top, bottom = bottom }
+    end
 
     local function destroyPipes()
         for _, pipe in ipairs(pipes) do
@@ -464,55 +549,70 @@ function FlappyBird.Init(container, scoreLabel)
         pipes = {}
     end
 
-    local function reset()
-        destroyPipes()
-        velocity = 0
-        birdY = CONTENT_H / 2
-        bird.Position = UDim2.fromOffset(BIRD_X, birdY)
-        dead = false
-        score = 0
-        spawnTimer = 0
-        scoreLabel.Text = "Score: 0"
-        overlay.Visible = false
+    local function spawnInitialPipes()
+        for i = 1, 3 do
+            local pipe = createPipe()
+            configurePipe(pipe, CONTENT_W + 80 + (i - 1) * PIPE_SPACING)
+            table.insert(pipes, pipe)
+        end
     end
 
-    local function gameOver()
-        if dead then return end
-        dead = true
-        overlayLabel.Text = "Game Over\nScore: " .. score
+    local function setIdle(enabled)
+        if idleTween then
+            idleTween:Cancel()
+            idleTween = nil
+        end
+        if enabled then
+            idleTween = TweenService:Create(bird, TweenInfo.new(1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {
+                Position = UDim2.fromOffset(BIRD_X, birdY - 14),
+            })
+            idleTween:Play()
+        end
+    end
+
+    local function resetGame()
+        destroyPipes()
+        birdY = PLAYABLE_HEIGHT / 2
+        birdVel = 0
+        score = 0
+        scoreLabel.Text = "Score: 0"
+        bird.Rotation = 0
+        bird.Position = UDim2.fromOffset(BIRD_X, birdY)
+        spawnInitialPipes()
+    end
+
+    local function startGame()
+        setIdle(false)
+        startOverlay.Visible = false
+        overlay.Visible = false
+        resetGame()
+        gameState = "playing"
+    end
+
+    local function endGame()
+        if gameState ~= "playing" then return end
+        gameState = "gameover"
+        if score > FlappyBird.Best then
+            FlappyBird.Best = score
+        end
+        overlayLabel.Text = "Perdu !\nScore: " .. score .. "  (Meilleur: " .. FlappyBird.Best .. ")"
         overlay.Visible = true
     end
 
-    local function spawnPipe()
-        local gapCenter = math.random(60, CONTENT_H - 60)
-        local topHeight = gapCenter - PIPE_GAP / 2
-        local bottomY = gapCenter + PIPE_GAP / 2
-
-        local top = create("Frame", {
-            Size = UDim2.fromOffset(PIPE_WIDTH, topHeight),
-            Position = UDim2.fromOffset(CONTENT_W, 0),
-            BackgroundColor3 = Color3.fromRGB(70, 200, 90),
-            ZIndex = 2,
-            Parent = container,
-        })
-        local bottom = create("Frame", {
-            Size = UDim2.fromOffset(PIPE_WIDTH, CONTENT_H - bottomY),
-            Position = UDim2.fromOffset(CONTENT_W, bottomY),
-            BackgroundColor3 = Color3.fromRGB(70, 200, 90),
-            ZIndex = 2,
-            Parent = container,
-        })
-
-        table.insert(pipes, { top = top, bottom = bottom, x = CONTENT_W, gapTop = topHeight, gapBottom = bottomY, scored = false })
-    end
-
     local function flap()
-        if dead then return end
-        velocity = JUMP_VELOCITY
+        if gameState == "playing" then
+            birdVel = FLAP_IMPULSE
+        elseif gameState == "start" then
+            startGame()
+        end
     end
+
+    bird.Position = UDim2.fromOffset(BIRD_X, birdY)
+    setIdle(true)
 
     table.insert(conns, flapButton.MouseButton1Down:Connect(flap))
-    table.insert(conns, restartButton.MouseButton1Click:Connect(reset))
+    table.insert(conns, startButton.MouseButton1Click:Connect(startGame))
+    table.insert(conns, restartButton.MouseButton1Click:Connect(startGame))
     table.insert(conns, UIS.InputBegan:Connect(function(input, processed)
         if processed then return end
         if input.KeyCode == Enum.KeyCode.Space or input.UserInputType == Enum.UserInputType.MouseButton1 then
@@ -521,54 +621,51 @@ function FlappyBird.Init(container, scoreLabel)
     end))
 
     table.insert(conns, RunService.Heartbeat:Connect(function(dt)
-        if dead then return end
+        if gameState ~= "playing" then return end
 
-        velocity += GRAVITY * dt
-        birdY += velocity * dt
-        if birdY < 0 then
-            birdY = 0
-            velocity = 0
-        end
-        if birdY > CONTENT_H - BIRD_SIZE then
-            birdY = CONTENT_H - BIRD_SIZE
-            gameOver()
+        birdVel += GRAVITY * dt
+        birdY += birdVel * dt
+        if birdY - BIRD_RADIUS < 0 then
+            birdY = BIRD_RADIUS
+            birdVel = 0
         end
         bird.Position = UDim2.fromOffset(BIRD_X, birdY)
+        bird.Rotation = math.clamp(birdVel / 12, -25, 70)
 
-        spawnTimer += dt
-        if spawnTimer >= SPAWN_INTERVAL then
-            spawnTimer = 0
-            spawnPipe()
-        end
-
-        for i = #pipes, 1, -1 do
-            local pipe = pipes[i]
+        local rightmostX = 0
+        for _, pipe in ipairs(pipes) do
             pipe.x -= PIPE_SPEED * dt
             pipe.top.Position = UDim2.fromOffset(pipe.x, 0)
             pipe.bottom.Position = UDim2.fromOffset(pipe.x, pipe.gapBottom)
+            rightmostX = math.max(rightmostX, pipe.x)
 
-            if pipe.x + PIPE_WIDTH < BIRD_X and not pipe.scored then
+            if not pipe.scored and pipe.x + PIPE_WIDTH < BIRD_X then
                 pipe.scored = true
                 score += 1
                 scoreLabel.Text = "Score: " .. score
             end
 
-            local overlapsX = (BIRD_X + BIRD_SIZE > pipe.x) and (BIRD_X < pipe.x + PIPE_WIDTH)
-            if overlapsX then
-                if birdY < pipe.gapTop or birdY + BIRD_SIZE > pipe.gapBottom then
-                    gameOver()
+            if BIRD_X + BIRD_RADIUS > pipe.x and BIRD_X - BIRD_RADIUS < pipe.x + PIPE_WIDTH then
+                if birdY - BIRD_RADIUS < pipe.gapTop or birdY + BIRD_RADIUS > pipe.gapBottom then
+                    endGame()
+                    return
                 end
             end
+        end
 
-            if pipe.x + PIPE_WIDTH < 0 then
-                pipe.top:Destroy()
-                pipe.bottom:Destroy()
-                table.remove(pipes, i)
+        for _, pipe in ipairs(pipes) do
+            if pipe.x + PIPE_WIDTH < -20 then
+                configurePipe(pipe, rightmostX + PIPE_SPACING)
             end
+        end
+
+        if birdY + BIRD_RADIUS >= PLAYABLE_HEIGHT then
+            endGame()
         end
     end))
 
     return function()
+        setIdle(false)
         for _, conn in ipairs(conns) do
             conn:Disconnect()
         end
