@@ -3675,6 +3675,19 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
     subLabel.TextColor3 = subColor
     subLabel.TextXAlignment = Enum.TextXAlignment.Left
 
+    -- Duel status: owners with __duels_block_steal set can't be stolen from right now.
+    local ownerPlayer = ownerUsername and Players:FindFirstChild(ownerUsername)
+    local isInDuel = ownerPlayer and ownerPlayer:GetAttribute("__duels_block_steal") == true
+    local duelLabel = Instance.new("TextLabel", alertFrame)
+    duelLabel.Size = UDim2.new(0, 70, 0, 14)
+    duelLabel.Position = UDim2.new(1, -78, 0, 12)
+    duelLabel.BackgroundTransparency = 1
+    duelLabel.Text = isInDuel and "IN DUEL" or "FREE"
+    duelLabel.Font = Enum.Font.GothamBlack
+    duelLabel.TextSize = 10
+    duelLabel.TextColor3 = isInDuel and Theme.Red or Theme.Green
+    duelLabel.TextXAlignment = Enum.TextXAlignment.Right
+
     TweenService:Create(alertFrame, TweenInfo.new(0.5, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
         Position = UDim2.new(0.5, 0, 0, 20)
     }):Play()
