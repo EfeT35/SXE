@@ -84,7 +84,7 @@ end
 
 --============ Téléphone ============--
 
-local PHONE_W, PHONE_H = 400, 800
+local PHONE_W, PHONE_H = 460, 900
 local BEZEL = 12
 local STATUSBAR_H = 26
 
@@ -226,7 +226,6 @@ local function openApp(app)
 	local closeBtn = button(titlebar, UDim2.new(0, 24, 0, 24), UDim2.new(1, -30, 0.5, -12), "x", Color3.fromRGB(200, 60, 60), Color3.fromRGB(255, 255, 255), 16, 42)
 
 	local content = frame(win, UDim2.new(0, GAME_W, 0, GAME_H), UDim2.new(0, 0, 0, TITLEBAR_H), Color3.fromRGB(255, 255, 255), 41)
-	content.ClipsDescendants = true
 
 	local gameConns
 	local ok, result = pcall(app.build, content)
@@ -383,7 +382,7 @@ local function buildFlappyBird(content)
 			birdVel += GRAVITY * dt
 			birdY += birdVel * dt
 		else
-			birdY = PLAYABLE_H / 2 + math.sin(os.clock() * 4) * 6
+			birdY = PLAYABLE_H / 2 + math.sin(tick() * 4) * 6
 		end
 		if birdY - BR < 0 then
 			birdY = BR
