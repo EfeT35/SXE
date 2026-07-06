@@ -1,14 +1,17 @@
 --[[
     Phone.lua
 
-    LocalScript a placer dans StarterPlayerScripts (ou a executer via un
-    executor). Cree un telephone a l'ecran avec plusieurs mini-jeux type
-    "Flappy Bird" et "Snake" jouables depuis l'ecran d'accueil, comme les
-    telephones qu'on trouve dans les jeux de vie (Brookhaven etc).
+    LocalScript a placer dans StarterPlayer > StarterPlayerScripts (ou a
+    executer via un executor). Cree un telephone a l'ecran avec plusieurs
+    mini-jeux (Flappy Bird, Snake, 2048) jouables depuis un ecran d'accueil.
+
+    N'utilise que des polices Roblox de base (SourceSans) et du texte ASCII
+    pour les icones/boutons : certains executors/clients ne rendent pas les
+    polices "Gotham" ni les emojis, ce qui rendait l'interface invisible.
 
     Pour ajouter une appli : construire une table {Name, Icon, Init} ou
-    Init(container) retourne une fonction cleanup(), puis l'ajouter avec
-    table.insert(Apps, ...).
+    Init(container, scoreLabel) retourne une fonction cleanup(), puis
+    l'ajouter avec table.insert(Apps, ...).
 ]]
 
 local Players = game:GetService("Players")
@@ -30,6 +33,13 @@ end
 local safeSpawn = (task and task.spawn) or spawn
 local safeWait = (task and task.wait) or wait
 
+local FONT_BOLD = Enum.Font.SourceSansBold
+local FONT_REGULAR = Enum.Font.SourceSans
+
+--------------------------------------------------------------------------
+-- Petits helpers de construction d'UI (memes conventions que SXE)
+--------------------------------------------------------------------------
+
 local function create(className, props)
     local inst = Instance.new(className)
     for key, value in pairs(props) do
@@ -41,6 +51,18 @@ local function create(className, props)
         inst.Parent = props.Parent
     end
     return inst
+end
+
+local function corner(obj, radius)
+    return create("UICorner", { CornerRadius = UDim.new(0, radius), Parent = obj })
+end
+
+local function stroke(obj, color, thickness)
+    return create("UIStroke", { Color = color, Thickness = thickness or 1.5, Parent = obj })
+end
+
+local function tw(obj, props, time)
+    TweenService:Create(obj, TweenInfo.new(time or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
 end
 
 --------------------------------------------------------------------------
@@ -63,18 +85,18 @@ local screenGui = create("ScreenGui", {
 
 local toggleButton = create("TextButton", {
     Name = "PhoneToggle",
-    Size = UDim2.fromOffset(56, 56),
-    Position = UDim2.new(1, -70, 1, -90),
-    AnchorPoint = Vector2.new(0, 0),
+    Size = UDim2.fromOffset(64, 44),
+    Position = UDim2.new(1, -78, 1, -90),
     BackgroundColor3 = Color3.fromRGB(35, 35, 40),
-    Text = "\240\159\147\177", -- emoji telephone
-    TextScaled = true,
-    Font = Enum.Font.GothamBold,
+    Text = "PHONE",
+    TextSize = 14,
+    Font = FONT_BOLD,
     TextColor3 = Color3.fromRGB(255, 255, 255),
     ZIndex = 10,
     Parent = screenGui,
 })
-create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = toggleButton })
+corner(toggleButton, 10)
+stroke(toggleButton, Color3.fromRGB(80, 80, 90), 1.5)
 
 local phoneFrame = create("Frame", {
     Name = "PhoneFrame",
@@ -86,8 +108,8 @@ local phoneFrame = create("Frame", {
     ZIndex = 5,
     Parent = screenGui,
 })
-create("UICorner", { CornerRadius = UDim.new(0, 34), Parent = phoneFrame })
-create("UIStroke", { Color = Color3.fromRGB(60, 60, 65), Thickness = 2, Parent = phoneFrame })
+corner(phoneFrame, 34)
+stroke(phoneFrame, Color3.fromRGB(60, 60, 65), 2)
 
 local phoneScale = create("UIScale", { Parent = phoneFrame })
 
@@ -95,6 +117,7 @@ local function updatePhoneScale()
     local camera = workspace.CurrentCamera
     if not camera then return end
     local viewport = camera.ViewportSize
+    if viewport.X <= 0 or viewport.Y <= 0 then return end
     local scale = math.min((viewport.Y * 0.92) / PHONE_H, (viewport.X * 0.92) / PHONE_W)
     phoneScale.Scale = math.clamp(scale, 0.5, 1.4)
 end
@@ -115,7 +138,6 @@ local dragHandle = create("Frame", {
     Parent = phoneFrame,
 })
 
--- Notch decoratif
 local notch = create("Frame", {
     Size = UDim2.fromOffset(70, 6),
     Position = UDim2.new(0.5, -35, 0, 4),
@@ -123,7 +145,7 @@ local notch = create("Frame", {
     ZIndex = 6,
     Parent = phoneFrame,
 })
-create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = notch })
+corner(notch, 3)
 
 local screenFrame = create("Frame", {
     Name = "Screen",
@@ -134,7 +156,7 @@ local screenFrame = create("Frame", {
     ZIndex = 5,
     Parent = phoneFrame,
 })
-create("UICorner", { CornerRadius = UDim.new(0, 24), Parent = screenFrame })
+corner(screenFrame, 24)
 
 --------------------------------------------------------------------------
 -- Drag du telephone (via la barre du haut)
@@ -150,11 +172,13 @@ do
             dragging = true
             dragStart = input.Position
             startPos = phoneFrame.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
         end
     end)
 
@@ -197,20 +221,11 @@ local homeScreen = create("Frame", {
     Parent = screenFrame,
 })
 
-create("Frame", {
-    Name = "DebugMarkerOrange",
-    Size = UDim2.fromOffset(100, 100),
-    Position = UDim2.fromOffset(150, 20),
-    BackgroundColor3 = Color3.fromRGB(255, 140, 0),
-    ZIndex = 50,
-    Parent = homeScreen,
-})
-
 local clockLabel = create("TextLabel", {
     Size = UDim2.new(1, 0, 0, 40),
     Position = UDim2.fromOffset(0, 14),
     BackgroundTransparency = 1,
-    Font = Enum.Font.GothamBold,
+    Font = FONT_BOLD,
     TextSize = 26,
     TextColor3 = Color3.fromRGB(255, 255, 255),
     Text = safeClockText(),
@@ -237,26 +252,6 @@ create("UIGridLayout", {
     Parent = iconHolder,
 })
 
-create("Frame", {
-    Name = "DebugMarkerPink",
-    Size = UDim2.fromOffset(80, 80),
-    BackgroundColor3 = Color3.fromRGB(255, 0, 170),
-    ZIndex = 50,
-    Parent = iconHolder,
-})
-create("TextButton", {
-    Name = "DebugMarkerButton",
-    Size = UDim2.fromOffset(80, 80),
-    Position = UDim2.fromOffset(0, 100),
-    BackgroundColor3 = Color3.fromRGB(0, 170, 255),
-    Text = "X",
-    TextSize = 30,
-    TextColor3 = Color3.fromRGB(0, 0, 0),
-    Font = Enum.Font.SourceSans,
-    ZIndex = 50,
-    Parent = iconHolder,
-})
-
 --------------------------------------------------------------------------
 -- Ecran d'une appli (topbar + zone de contenu)
 --------------------------------------------------------------------------
@@ -276,23 +271,23 @@ local topBar = create("Frame", {
 })
 
 local backButton = create("TextButton", {
-    Size = UDim2.fromOffset(30, TOPBAR_H),
+    Size = UDim2.fromOffset(34, TOPBAR_H),
     Position = UDim2.fromOffset(4, 0),
     BackgroundTransparency = 1,
-    Text = "\226\151\128", -- fleche retour
+    Text = "<",
     TextColor3 = Color3.fromRGB(255, 255, 255),
-    TextScaled = true,
-    Font = Enum.Font.GothamBold,
+    TextSize = 22,
+    Font = FONT_BOLD,
     Parent = topBar,
 })
 
 local titleLabel = create("TextLabel", {
     Size = UDim2.new(1, -80, 1, 0),
-    Position = UDim2.fromOffset(36, 0),
+    Position = UDim2.fromOffset(40, 0),
     BackgroundTransparency = 1,
     TextColor3 = Color3.fromRGB(255, 255, 255),
-    Font = Enum.Font.GothamBold,
-    TextSize = 18,
+    Font = FONT_BOLD,
+    TextSize = 16,
     TextXAlignment = Enum.TextXAlignment.Left,
     Text = "",
     Parent = topBar,
@@ -303,8 +298,8 @@ local scoreLabel = create("TextLabel", {
     Position = UDim2.new(1, -74, 0, 0),
     BackgroundTransparency = 1,
     TextColor3 = Color3.fromRGB(255, 255, 100),
-    Font = Enum.Font.GothamBold,
-    TextSize = 16,
+    Font = FONT_BOLD,
+    TextSize = 14,
     TextXAlignment = Enum.TextXAlignment.Right,
     Text = "",
     Parent = topBar,
@@ -372,18 +367,19 @@ local function buildHomeScreen()
             Position = UDim2.fromOffset(6, 0),
             BackgroundColor3 = app.Color or Color3.fromRGB(60, 120, 220),
             Text = app.Icon,
-            TextScaled = true,
-            Font = Enum.Font.GothamBold,
+            TextSize = 20,
+            Font = FONT_BOLD,
+            TextColor3 = Color3.fromRGB(255, 255, 255),
             Parent = wrapper,
         })
-        create("UICorner", { CornerRadius = UDim.new(0, 16), Parent = iconButton })
+        corner(iconButton, 16)
 
         create("TextLabel", {
             Size = UDim2.new(1, 0, 0, 22),
             Position = UDim2.fromOffset(0, 68),
             BackgroundTransparency = 1,
             TextColor3 = Color3.fromRGB(230, 230, 230),
-            Font = Enum.Font.Gotham,
+            Font = FONT_REGULAR,
             TextSize = 13,
             Text = app.Name,
             Parent = wrapper,
@@ -409,10 +405,10 @@ local function buildDPad(parent, onDirection)
     })
 
     local specs = {
-        { text = "\226\150\178", pos = UDim2.fromOffset(48, 0), dir = "Up" },
-        { text = "\226\150\188", pos = UDim2.fromOffset(48, 96), dir = "Down" },
-        { text = "\226\151\128", pos = UDim2.fromOffset(0, 48), dir = "Left" },
-        { text = "\226\150\182", pos = UDim2.fromOffset(96, 48), dir = "Right" },
+        { text = "^", pos = UDim2.fromOffset(48, 0), dir = "Up" },
+        { text = "v", pos = UDim2.fromOffset(48, 96), dir = "Down" },
+        { text = "<", pos = UDim2.fromOffset(0, 48), dir = "Left" },
+        { text = ">", pos = UDim2.fromOffset(96, 48), dir = "Right" },
     }
 
     local connections = {}
@@ -423,12 +419,12 @@ local function buildDPad(parent, onDirection)
             BackgroundColor3 = Color3.fromRGB(40, 40, 46),
             TextColor3 = Color3.fromRGB(255, 255, 255),
             Text = spec.text,
-            TextScaled = true,
-            Font = Enum.Font.GothamBold,
+            TextSize = 22,
+            Font = FONT_BOLD,
             ZIndex = 3,
             Parent = pad,
         })
-        create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = btn })
+        corner(btn, 10)
         table.insert(connections, btn.MouseButton1Click:Connect(function()
             onDirection(spec.dir)
         end))
@@ -441,7 +437,7 @@ end
 -- Appli 1 : Flappy Bird
 --------------------------------------------------------------------------
 
-local FlappyBird = { Name = "Flappy", Icon = "\240\159\144\166", Color = Color3.fromRGB(80, 170, 235), Best = 0 }
+local FlappyBird = { Name = "Flappy", Icon = "FB", Color = Color3.fromRGB(80, 170, 235), Best = 0 }
 
 function FlappyBird.Init(container, scoreLabel)
     local GRAVITY = 900
@@ -476,7 +472,7 @@ function FlappyBird.Init(container, scoreLabel)
         ZIndex = 4,
         Parent = container,
     })
-    create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = bird })
+    corner(bird, BIRD_RADIUS)
     create("Frame", {
         Size = UDim2.fromOffset(10, 6),
         Position = UDim2.new(1, -4, 0.5, -3),
@@ -510,7 +506,7 @@ function FlappyBird.Init(container, scoreLabel)
         Size = UDim2.new(1, -20, 0, 40),
         Position = UDim2.new(0, 10, 0.3, 0),
         BackgroundTransparency = 1,
-        Font = Enum.Font.GothamBold,
+        Font = FONT_BOLD,
         TextSize = 22,
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Text = "Flappy Bird",
@@ -521,14 +517,14 @@ function FlappyBird.Init(container, scoreLabel)
         Size = UDim2.fromOffset(140, 44),
         Position = UDim2.new(0.5, -70, 0.5, 0),
         BackgroundColor3 = Color3.fromRGB(94, 201, 98),
-        Font = Enum.Font.GothamBold,
+        Font = FONT_BOLD,
         TextSize = 18,
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Text = "Jouer",
         ZIndex = 7,
         Parent = startOverlay,
     })
-    create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = startButton })
+    corner(startButton, 10)
 
     local overlay = createOverlay()
     local overlayLabel = create("TextLabel", {
@@ -536,8 +532,8 @@ function FlappyBird.Init(container, scoreLabel)
         Position = UDim2.new(0, 0, 0.28, 0),
         BackgroundTransparency = 1,
         TextColor3 = Color3.fromRGB(255, 255, 255),
-        Font = Enum.Font.GothamBold,
-        TextSize = 22,
+        Font = FONT_BOLD,
+        TextSize = 20,
         Text = "Perdu !",
         ZIndex = 7,
         Parent = overlay,
@@ -546,14 +542,14 @@ function FlappyBird.Init(container, scoreLabel)
         Size = UDim2.fromOffset(140, 44),
         Position = UDim2.new(0.5, -70, 0.55, 0),
         BackgroundColor3 = Color3.fromRGB(80, 170, 235),
-        Font = Enum.Font.GothamBold,
+        Font = FONT_BOLD,
         TextSize = 18,
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Text = "Rejouer",
         ZIndex = 7,
         Parent = overlay,
     })
-    create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = restartButton })
+    corner(restartButton, 10)
 
     local function configurePipe(pipe, x)
         local gapCenter = math.random(70, math.max(71, PLAYABLE_HEIGHT - 70))
@@ -713,7 +709,7 @@ table.insert(Apps, FlappyBird)
 -- Appli 2 : Snake
 --------------------------------------------------------------------------
 
-local SnakeApp = { Name = "Snake", Icon = "\240\159\144\141", Color = Color3.fromRGB(70, 200, 110) }
+local SnakeApp = { Name = "Snake", Icon = "SN", Color = Color3.fromRGB(70, 200, 110) }
 
 function SnakeApp.Init(container, scoreLabel)
     local CELL = 20
@@ -745,7 +741,7 @@ function SnakeApp.Init(container, scoreLabel)
         ZIndex = 2,
         Parent = board,
     })
-    create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = appleFrame })
+    corner(appleFrame, 6)
 
     local overlay = create("Frame", {
         Size = UDim2.fromScale(1, 1),
@@ -760,8 +756,8 @@ function SnakeApp.Init(container, scoreLabel)
         Position = UDim2.new(0, 0, 0.3, 0),
         BackgroundTransparency = 1,
         TextColor3 = Color3.fromRGB(255, 255, 255),
-        Font = Enum.Font.GothamBold,
-        TextSize = 26,
+        Font = FONT_BOLD,
+        TextSize = 22,
         Text = "Game Over",
         ZIndex = 6,
         Parent = overlay,
@@ -770,14 +766,14 @@ function SnakeApp.Init(container, scoreLabel)
         Size = UDim2.fromOffset(140, 44),
         Position = UDim2.new(0.5, -70, 0.55, 0),
         BackgroundColor3 = Color3.fromRGB(70, 200, 110),
-        Font = Enum.Font.GothamBold,
+        Font = FONT_BOLD,
         TextSize = 18,
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Text = "Rejouer",
         ZIndex = 6,
         Parent = overlay,
     })
-    create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = restartButton })
+    corner(restartButton, 10)
 
     local function cellPosition(cx, cy)
         return UDim2.fromOffset(OFFSET_X + cx * CELL + 1, OFFSET_Y + cy * CELL + 1)
@@ -800,7 +796,7 @@ function SnakeApp.Init(container, scoreLabel)
                 ZIndex = 2,
                 Parent = board,
             })
-            create("UICorner", { CornerRadius = UDim.new(0, 4), Parent = frame })
+            corner(frame, 4)
             table.insert(segmentFrames, frame)
         end
     end
@@ -929,7 +925,7 @@ table.insert(Apps, SnakeApp)
 -- Appli 3 : 2048
 --------------------------------------------------------------------------
 
-local Game2048 = { Name = "2048", Icon = "\240\159\148\162", Color = Color3.fromRGB(230, 160, 60) }
+local Game2048 = { Name = "2048", Icon = "2048", Color = Color3.fromRGB(230, 160, 60) }
 
 local TILE_COLORS = {
     [2] = Color3.fromRGB(238, 228, 218), [4] = Color3.fromRGB(237, 224, 200),
@@ -960,7 +956,7 @@ function Game2048.Init(container, scoreLabel)
         BackgroundColor3 = Color3.fromRGB(40, 36, 32),
         Parent = container,
     })
-    create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = board })
+    corner(board, 10)
 
     for x = 1, SIZE do
         for y = 1, SIZE do
@@ -987,8 +983,8 @@ function Game2048.Init(container, scoreLabel)
         Position = UDim2.new(0, 0, 0.3, 0),
         BackgroundTransparency = 1,
         TextColor3 = Color3.fromRGB(255, 255, 255),
-        Font = Enum.Font.GothamBold,
-        TextSize = 26,
+        Font = FONT_BOLD,
+        TextSize = 22,
         Text = "Perdu !",
         ZIndex = 6,
         Parent = overlay,
@@ -997,14 +993,14 @@ function Game2048.Init(container, scoreLabel)
         Size = UDim2.fromOffset(140, 44),
         Position = UDim2.new(0.5, -70, 0.55, 0),
         BackgroundColor3 = Color3.fromRGB(230, 160, 60),
-        Font = Enum.Font.GothamBold,
+        Font = FONT_BOLD,
         TextSize = 18,
         TextColor3 = Color3.fromRGB(255, 255, 255),
         Text = "Rejouer",
         ZIndex = 6,
         Parent = overlay,
     })
-    create("UICorner", { CornerRadius = UDim.new(0, 10), Parent = restartButton })
+    corner(restartButton, 10)
 
     local function clearTiles()
         for _, frame in ipairs(tileFrames) do
@@ -1026,12 +1022,12 @@ function Game2048.Init(container, scoreLabel)
                         ZIndex = 2,
                         Parent = board,
                     })
-                    create("UICorner", { CornerRadius = UDim.new(0, 6), Parent = frame })
+                    corner(frame, 6)
                     create("TextLabel", {
                         Size = UDim2.fromScale(1, 1),
                         BackgroundTransparency = 1,
-                        Font = Enum.Font.GothamBold,
-                        TextScaled = true,
+                        Font = FONT_BOLD,
+                        TextSize = value >= 1000 and 20 or (value >= 100 and 24 or 30),
                         TextColor3 = value <= 4 and Color3.fromRGB(60, 55, 50) or Color3.fromRGB(255, 255, 255),
                         Text = tostring(value),
                         ZIndex = 3,
@@ -1212,17 +1208,6 @@ table.insert(Apps, Game2048)
 --------------------------------------------------------------------------
 
 buildHomeScreen()
-
--- Marqueur de debug temporaire : si ce carre vert n'apparait pas non plus,
--- le souci n'est pas specifique a l'horloge/aux icones.
-create("Frame", {
-    Name = "DebugMarker",
-    Size = UDim2.fromOffset(100, 100),
-    Position = UDim2.fromOffset(20, 20),
-    BackgroundColor3 = Color3.fromRGB(0, 255, 0),
-    ZIndex = 50,
-    Parent = screenFrame,
-})
 
 end)
 
