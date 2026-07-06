@@ -149,60 +149,65 @@ gridLayout.CellPadding = UDim2.new(0, 10, 0, 14)
 gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.Parent = gridArea
 
---============ Gestionnaire de fenêtres (draggable) ============--
+--============ Téléphone déplaçable (on le tire par son boîtier) ============--
+
+local phoneDragging, phoneDragStart, phoneStartPos = false, nil, nil
+phoneOuter.Active = true
+
+local function isOverScreenArea(pos)
+	local abs, size = screenArea.AbsolutePosition, screenArea.AbsoluteSize
+	return pos.X >= abs.X and pos.X <= abs.X + size.X and pos.Y >= abs.Y and pos.Y <= abs.Y + size.Y
+end
+
+phoneOuter.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		if isOverScreenArea(input.Position) then return end
+		phoneDragging = true
+		phoneDragStart = input.Position
+		phoneStartPos = phoneOuter.Position
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if phoneDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - phoneDragStart
+		phoneOuter.Position = UDim2.new(phoneStartPos.X.Scale, phoneStartPos.X.Offset + delta.X, phoneStartPos.Y.Scale, phoneStartPos.Y.Offset + delta.Y)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		phoneDragging = false
+	end
+end)
+
+--============ Gestionnaire d'applis (une seule ouverte à la fois) ============--
 
 local GAME_W, GAME_H = 280, 380
 local TITLEBAR_H = 30
 
-local openWindows = {}
-local topZ = 100
+local currentAppName = nil
+local currentWin = nil
+local currentConns = {}
 
-local function makeDraggable(handle, win)
-	local dragging, dragStart, startPos = false, nil, nil
-	local conns = {}
-
-	table.insert(conns, handle.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			dragStart = input.Position
-			startPos = win.Position
-			topZ += 1
-			win.ZIndex = topZ
-		end
-	end))
-
-	table.insert(conns, UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			local delta = input.Position - dragStart
-			win.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-		end
-	end))
-
-	table.insert(conns, UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = false
-		end
-	end))
-
-	return conns
+local function closeCurrentApp()
+	for _, c in ipairs(currentConns) do c:Disconnect() end
+	currentConns = {}
+	if currentWin then
+		currentWin:Destroy()
+		currentWin = nil
+	end
+	currentAppName = nil
 end
 
 local function openApp(app)
-	if openWindows[app.name] then
-		topZ += 1
-		openWindows[app.name].ZIndex = topZ
-		return
-	end
+	if currentAppName == app.name then return end
+	closeCurrentApp()
 
 	local winH = TITLEBAR_H + GAME_H
-	local cascade = 0
-	for _ in pairs(openWindows) do cascade += 18 end
-
-	local win = frame(screenArea, UDim2.new(0, GAME_W, 0, winH), UDim2.new(0.5, -GAME_W / 2 + cascade, 0.5, -winH / 2 + cascade), Color3.fromRGB(28, 28, 34), 40)
+	local win = frame(screenArea, UDim2.new(0, GAME_W, 0, winH), UDim2.new(0.5, -GAME_W / 2, 0.5, -winH / 2), Color3.fromRGB(28, 28, 34), 40)
 	win.ClipsDescendants = true
 	corner(win, UDim.new(0, 16))
-	topZ += 1
-	win.ZIndex = topZ
 
 	local winStroke = Instance.new("UIStroke")
 	winStroke.Color = Color3.fromRGB(255, 255, 255)
@@ -211,7 +216,6 @@ local function openApp(app)
 	winStroke.Parent = win
 
 	local titlebar = frame(win, UDim2.new(1, 0, 0, TITLEBAR_H), UDim2.new(0, 0, 0, 0), Color3.fromRGB(45, 45, 55), 41)
-	titlebar.Active = true
 
 	local dot = frame(titlebar, UDim2.new(0, 8, 0, 8), UDim2.new(0, 10, 0.5, -4), app.color, 42)
 	corner(dot, UDim.new(1, 0))
@@ -223,8 +227,6 @@ local function openApp(app)
 
 	local content = frame(win, UDim2.new(0, GAME_W, 0, GAME_H), UDim2.new(0, 0, 0, TITLEBAR_H), Color3.fromRGB(255, 255, 255), 41)
 	content.ClipsDescendants = true
-
-	local dragConns = makeDraggable(titlebar, win)
 
 	local gameConns
 	local ok, result = pcall(app.build, content)
@@ -238,17 +240,11 @@ local function openApp(app)
 		gameConns = {}
 	end
 
-	local allConns = {}
-	for _, c in ipairs(dragConns) do table.insert(allConns, c) end
-	for _, c in ipairs(gameConns) do table.insert(allConns, c) end
+	currentWin = win
+	currentConns = gameConns
+	currentAppName = app.name
 
-	closeBtn.MouseButton1Click:Connect(function()
-		for _, c in ipairs(allConns) do c:Disconnect() end
-		win:Destroy()
-		openWindows[app.name] = nil
-	end)
-
-	openWindows[app.name] = win
+	closeBtn.MouseButton1Click:Connect(closeCurrentApp)
 end
 
 --============ Jeu 1 : Flappy Bird ============--
