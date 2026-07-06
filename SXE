@@ -3727,10 +3727,15 @@ task.spawn(function()
                 end
             end
 
-            if bestPet and bestPet.uid ~= lastAlertedPriorityUID then
+            -- uid is the plot+slot position, not the animal instance -- a new spawn can
+            -- reuse the same slot as the last one alerted, so dedupe on name+mutation
+            -- too, otherwise a genuinely new priority brainrot in an old slot never re-alerts.
+            local bestPetSignature = bestPet and (bestPet.uid .. "|" .. bestPet.name .. "|" .. tostring(bestPet.mutation))
+
+            if bestPet and bestPetSignature ~= lastAlertedPriorityUID then
                 -- A good (priority-list) brainrot: re-alert every time a new one shows up,
                 -- regardless of whether it's higher/lower priority than the last one shown.
-                lastAlertedPriorityUID = bestPet.uid
+                lastAlertedPriorityUID = bestPetSignature
                 ShowPriorityAlertImpl(bestPet.name, bestPet.genText, bestPet.mutation, bestPet.owner)
             elseif not bestPet and bestFallbackPet and not fallbackAlertShown then
                 -- Nothing matches the priority list: alert once on the best one available, never again.
