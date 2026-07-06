@@ -3691,6 +3691,7 @@ local function ShowPriorityAlertImpl(brainrotName, genText, mutation, ownerUsern
 end
 
 local highestAlertedPriorityIndex = 99999
+local lastAlertedFallbackUID = nil
 
 task.spawn(function()
     while true do
@@ -3698,34 +3699,43 @@ task.spawn(function()
         pcall(function()
             local cache = SharedState.AllAnimalsCache
             if not cache or #cache == 0 then return end
-            
-            local bestPet = nil
-            local bestPriorityIndex = 99999
-            
+
+            local myName = LocalPlayer.Name
+            local myDisplay = LocalPlayer.DisplayName
+
+            local bestPet, bestPriorityIndex = nil, nil
+            local bestFallbackPet = nil -- cache is sorted by genValue desc, so first non-owned = best available
+
             for _, pet in ipairs(cache) do
-                local priorityIndex = nil
-                for idx, pName in ipairs(priorityList) do
-                    if pName:lower() == pet.name:lower() then
-                        priorityIndex = idx
-                        break
+                if pet.owner ~= myName and pet.owner ~= myDisplay then
+                    if not bestFallbackPet then
+                        bestFallbackPet = pet
                     end
-                end
-                
-                if priorityIndex then
-                    if priorityIndex < bestPriorityIndex then
+
+                    local priorityIndex = nil
+                    for idx, pName in ipairs(priorityList) do
+                        if pName:lower() == pet.name:lower() then
+                            priorityIndex = idx
+                            break
+                        end
+                    end
+
+                    if priorityIndex and (not bestPriorityIndex or priorityIndex < bestPriorityIndex) then
                         bestPriorityIndex = priorityIndex
                         bestPet = pet
                     end
                 end
             end
-            
+
             if bestPet and bestPriorityIndex < highestAlertedPriorityIndex then
-                local myName = LocalPlayer.Name
-                local myDisplay = LocalPlayer.DisplayName
-                if bestPet.owner ~= myName and bestPet.owner ~= myDisplay then
-                    highestAlertedPriorityIndex = bestPriorityIndex
-                    ShowPriorityAlertImpl(bestPet.name, bestPet.genText, bestPet.mutation, bestPet.owner)
-                end
+                -- Matches the priority list: same behavior as before.
+                highestAlertedPriorityIndex = bestPriorityIndex
+                lastAlertedFallbackUID = bestPet.uid
+                ShowPriorityAlertImpl(bestPet.name, bestPet.genText, bestPet.mutation, bestPet.owner)
+            elseif not bestPet and bestFallbackPet and bestFallbackPet.uid ~= lastAlertedFallbackUID then
+                -- Nothing on the map matches the priority list: alert on the best one available anyway.
+                lastAlertedFallbackUID = bestFallbackPet.uid
+                ShowPriorityAlertImpl(bestFallbackPet.name, bestFallbackPet.genText, bestFallbackPet.mutation, bestFallbackPet.owner)
             end
         end)
     end
