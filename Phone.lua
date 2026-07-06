@@ -1178,6 +1178,17 @@ table.insert(Apps, Game2048)
 
 buildHomeScreen()
 
+-- Marqueur de debug temporaire : si ce carre vert n'apparait pas non plus,
+-- le souci n'est pas specifique a l'horloge/aux icones.
+create("Frame", {
+    Name = "DebugMarker",
+    Size = UDim2.fromOffset(100, 100),
+    Position = UDim2.fromOffset(20, 20),
+    BackgroundColor3 = Color3.fromRGB(0, 255, 0),
+    ZIndex = 50,
+    Parent = screenFrame,
+})
+
 end)
 
 if not buildOk then
