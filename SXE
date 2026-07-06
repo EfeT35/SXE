@@ -15,7 +15,12 @@ CoreGui = game:GetService("CoreGui")
 VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Unlimited FPS: remove Roblox's default 240 FPS cap. 0 = uncapped on most executors.
-pcall(function() if setfpscap then setfpscap(0) end end)
+-- Stored globally so any code that temporarily raises the cap (TP/carpet boosts)
+-- restores THIS value instead of a hardcoded 60 -- getfpscap() isn't implemented
+-- on most executors, so the old "pcall(getfpscap) or 60" fallback was permanently
+-- re-capping FPS at 60 after the first auto-TP.
+_G.SXE_BaseFPSCap = 0
+pcall(function() if setfpscap then setfpscap(_G.SXE_BaseFPSCap) end end)
 
 -- Insta-reset state captured by the FireServer hook below.
 -- GUID is the first arg of the balloon payload. Defaults to a randomly-generated
@@ -5227,7 +5232,7 @@ function runAutoSnipe()
     if not hrp or not hum or (hum.Health <= 0) then
         return
     end
-    local lastFpsCap = pcall(getfpscap) and getfpscap() or 60
+    local lastFpsCap = (pcall(getfpscap) and getfpscap()) or _G.SXE_BaseFPSCap
     pcall(setfpscap, 200)
     -- (Old Grabble TP branch removed - now handled by SXE Clone-TP router above.)
     _G._isTpMoving = true
@@ -5588,7 +5593,7 @@ function tpToBrainrot()
     if not targetPart then
         return
     end
-    local lastFpsCap = pcall(getfpscap) and getfpscap() or 60
+    local lastFpsCap = (pcall(getfpscap) and getfpscap()) or _G.SXE_BaseFPSCap
     pcall(setfpscap, 200)
     local ok, err = pcall(function()
         local carpetName = Config.TpSettings.Tool
