@@ -595,160 +595,167 @@ _G.applyTheme = applyTheme
 
 -- RAINBOW UI MODE: cycles every accent color through the hue wheel while
 -- leaving Background/Panel/Row/Text (the dark base) untouched.
-local rainbowThread = nil
-local rainbowTargets = {}
-local rainbowSeen = setmetatable({}, {__mode = "k"})
-local RAINBOW_KEYS = {"Accent", "AccentLight", "Green", "Red", "Red2", "Stroke", "SoftAccent", "SoftAccentHover", "SliderBg"}
+-- Scoped in a do...end (like the X-Ray section below) so its internal state
+-- doesn't eat into the script's 200 local-register budget.
+do
+    local rainbowThread = nil
+    local rainbowTargets = {}
+    local rainbowSeen = setmetatable({}, {__mode = "k"})
+    local RAINBOW_KEYS = {"Accent", "AccentLight", "Green", "Red", "Red2", "Stroke", "SoftAccent", "SoftAccentHover", "SliderBg"}
 
-local function scanRainbowTargets(root)
-    if not root then return end
-    local function walk(inst)
-        if inst:IsA("GuiObject") or inst:IsA("UIStroke") then
-            for _, prop in ipairs({"BackgroundColor3", "TextColor3", "Color"}) do
-                local ok, current = pcall(function() return inst[prop] end)
-                if ok and typeof(current) == "Color3" and not (rainbowSeen[inst] and rainbowSeen[inst][prop]) then
-                    for _, key in ipairs(RAINBOW_KEYS) do
-                        local base = Themes.Dark[key]
-                        if (current.R - base.R)^2 + (current.G - base.G)^2 + (current.B - base.B)^2 < 0.0001 then
-                            local _, s, v = base:ToHSV()
-                            table.insert(rainbowTargets, {inst = inst, prop = prop, key = key, s = s, v = v})
-                            rainbowSeen[inst] = rainbowSeen[inst] or {}
-                            rainbowSeen[inst][prop] = true
-                            break
+    local function scanRainbowTargets(root)
+        if not root then return end
+        local function walk(inst)
+            if inst:IsA("GuiObject") or inst:IsA("UIStroke") then
+                for _, prop in ipairs({"BackgroundColor3", "TextColor3", "Color"}) do
+                    local ok, current = pcall(function() return inst[prop] end)
+                    if ok and typeof(current) == "Color3" and not (rainbowSeen[inst] and rainbowSeen[inst][prop]) then
+                        for _, key in ipairs(RAINBOW_KEYS) do
+                            local base = Themes.Dark[key]
+                            if (current.R - base.R)^2 + (current.G - base.G)^2 + (current.B - base.B)^2 < 0.0001 then
+                                local _, s, v = base:ToHSV()
+                                table.insert(rainbowTargets, {inst = inst, prop = prop, key = key, s = s, v = v})
+                                rainbowSeen[inst] = rainbowSeen[inst] or {}
+                                rainbowSeen[inst][prop] = true
+                                break
+                            end
                         end
                     end
                 end
             end
+            for _, child in ipairs(inst:GetChildren()) do
+                walk(child)
+            end
         end
-        for _, child in ipairs(inst:GetChildren()) do
-            walk(child)
-        end
-    end
-    pcall(walk, root)
-end
-
-local function scanAllRainbowRoots()
-    pcall(function() scanRainbowTargets(playerGui:FindFirstChild("SXEHub_V3")) end)
-    for _, name in ipairs({"SXE_RemoteSell", "SXE_StealProgressBar", "XiAdminPanel"}) do
-        pcall(function() scanRainbowTargets(playerGui:FindFirstChild(name)) end)
-    end
-    pcall(function()
-        local ExploitGui = (gethui and gethui()) or game:GetService("CoreGui")
-        scanRainbowTargets(ExploitGui:FindFirstChild("XiPriorityAlertTest"))
-    end)
-end
-
-function setRainbowMode(enabled)
-    Config.RainbowMode = enabled
-    saveConfig()
-    setToggle("Rainbow UI", enabled)
-
-    if not enabled then
-        if rainbowThread then
-            task.cancel(rainbowThread)
-            rainbowThread = nil
-        end
-        for _, entry in ipairs(rainbowTargets) do
-            pcall(function() entry.inst[entry.prop] = Themes.Dark[entry.key] end)
-        end
-        rainbowTargets = {}
-        rainbowSeen = setmetatable({}, {__mode = "k"})
-        return
+        pcall(walk, root)
     end
 
-    if rainbowThread then return end
+    local function scanAllRainbowRoots()
+        pcall(function() scanRainbowTargets(playerGui:FindFirstChild("SXEHub_V3")) end)
+        for _, name in ipairs({"SXE_RemoteSell", "SXE_StealProgressBar", "XiAdminPanel"}) do
+            pcall(function() scanRainbowTargets(playerGui:FindFirstChild(name)) end)
+        end
+        pcall(function()
+            local ExploitGui = (gethui and gethui()) or game:GetService("CoreGui")
+            scanRainbowTargets(ExploitGui:FindFirstChild("XiPriorityAlertTest"))
+        end)
+    end
 
-    scanAllRainbowRoots()
-    rainbowThread = task.spawn(function()
-        local lastScan = tick()
-        while Config.RainbowMode do
-            local hue = (tick() * 0.15) % 1
+    function setRainbowMode(enabled)
+        Config.RainbowMode = enabled
+        saveConfig()
+        setToggle("Rainbow UI", enabled)
+
+        if not enabled then
+            if rainbowThread then
+                task.cancel(rainbowThread)
+                rainbowThread = nil
+            end
             for _, entry in ipairs(rainbowTargets) do
-                pcall(function() entry.inst[entry.prop] = Color3.fromHSV(hue, entry.s, entry.v) end)
+                pcall(function() entry.inst[entry.prop] = Themes.Dark[entry.key] end)
             end
-            if tick() - lastScan > 2 then
-                scanAllRainbowRoots()
-                lastScan = tick()
-            end
-            task.wait(0.05)
+            rainbowTargets = {}
+            rainbowSeen = setmetatable({}, {__mode = "k"})
+            return
         end
-    end)
+
+        if rainbowThread then return end
+
+        scanAllRainbowRoots()
+        rainbowThread = task.spawn(function()
+            local lastScan = tick()
+            while Config.RainbowMode do
+                local hue = (tick() * 0.15) % 1
+                for _, entry in ipairs(rainbowTargets) do
+                    pcall(function() entry.inst[entry.prop] = Color3.fromHSV(hue, entry.s, entry.v) end)
+                end
+                if tick() - lastScan > 2 then
+                    scanAllRainbowRoots()
+                    lastScan = tick()
+                end
+                task.wait(0.05)
+            end
+        end)
+    end
+    _G.setRainbowMode = setRainbowMode
 end
-_G.setRainbowMode = setRainbowMode
 
 -- CUSTOM UI COLORS: static primary (accent) / secondary (dark background) hue pickers.
 -- Mutates the live Theme table directly (so anything built from here on already
 -- picks up the new colors) and does a single recolor pass over existing instances
 -- by diffing against their pre-change color -- no tab rebuild, so it's safe to call
 -- mid-drag without breaking the slider's own input connection.
-local PRIMARY_COLOR_KEYS = RAINBOW_KEYS
-local SECONDARY_COLOR_KEYS = {"Background", "MainBackground", "Panel", "Row", "RowHover", "SoftButton", "SoftButtonHover", "ToggleOff", "ToggleOff2", "InputBg"}
-local SECONDARY_SATURATION = 0.35 -- keeps the background a visible dark tint (e.g. dark pink) instead of flat gray
-local uiColorCommitThread = nil
+-- Also scoped in a do...end to stay out of the local-register budget.
+do
+    local PRIMARY_COLOR_KEYS = {"Accent", "AccentLight", "Green", "Red", "Red2", "Stroke", "SoftAccent", "SoftAccentHover", "SliderBg"}
+    local SECONDARY_COLOR_KEYS = {"Background", "MainBackground", "Panel", "Row", "RowHover", "SoftButton", "SoftButtonHover", "ToggleOff", "ToggleOff2", "InputBg"}
+    local SECONDARY_SATURATION = 0.35 -- keeps the background a visible dark tint (e.g. dark pink) instead of flat gray
+    local uiColorCommitThread = nil
 
-local function recolorExistingInstances(before, after)
-    local function updateInstanceColor(inst)
-        if inst:IsA("GuiObject") or inst:IsA("UIStroke") then
-            for _, prop in ipairs({"BackgroundColor3", "TextColor3", "Color"}) do
-                local ok, current = pcall(function() return inst[prop] end)
-                if ok and typeof(current) == "Color3" then
-                    for key, oldColor in pairs(before) do
-                        if (current.R - oldColor.R)^2 + (current.G - oldColor.G)^2 + (current.B - oldColor.B)^2 < 0.0001 then
-                            inst[prop] = after[key]
-                            break
+    local function recolorExistingInstances(before, after)
+        local function updateInstanceColor(inst)
+            if inst:IsA("GuiObject") or inst:IsA("UIStroke") then
+                for _, prop in ipairs({"BackgroundColor3", "TextColor3", "Color"}) do
+                    local ok, current = pcall(function() return inst[prop] end)
+                    if ok and typeof(current) == "Color3" then
+                        for key, oldColor in pairs(before) do
+                            if (current.R - oldColor.R)^2 + (current.G - oldColor.G)^2 + (current.B - oldColor.B)^2 < 0.0001 then
+                                inst[prop] = after[key]
+                                break
+                            end
                         end
                     end
                 end
             end
+            for _, child in ipairs(inst:GetChildren()) do
+                updateInstanceColor(child)
+            end
         end
-        for _, child in ipairs(inst:GetChildren()) do
-            updateInstanceColor(child)
+        pcall(function() updateInstanceColor(playerGui:FindFirstChild("SXEHub_V3")) end)
+        for _, name in ipairs({"SXE_RemoteSell", "SXE_StealProgressBar", "XiAdminPanel"}) do
+            pcall(function() updateInstanceColor(playerGui:FindFirstChild(name)) end)
         end
+        pcall(function()
+            local ExploitGui = (gethui and gethui()) or game:GetService("CoreGui")
+            updateInstanceColor(ExploitGui:FindFirstChild("XiPriorityAlertTest"))
+        end)
     end
-    pcall(function() updateInstanceColor(playerGui:FindFirstChild("SXEHub_V3")) end)
-    for _, name in ipairs({"SXE_RemoteSell", "SXE_StealProgressBar", "XiAdminPanel"}) do
-        pcall(function() updateInstanceColor(playerGui:FindFirstChild(name)) end)
+
+    function setUIColors(primaryHue, secondaryHue)
+        Config.PrimaryHue = primaryHue
+        Config.SecondaryHue = secondaryHue
+        saveConfig()
+
+        local before = {}
+        for _, key in ipairs(PRIMARY_COLOR_KEYS) do before[key] = Theme[key] end
+        for _, key in ipairs(SECONDARY_COLOR_KEYS) do before[key] = Theme[key] end
+
+        for _, key in ipairs(PRIMARY_COLOR_KEYS) do
+            local _, s, v = Themes.Dark[key]:ToHSV()
+            Theme[key] = Color3.fromHSV(primaryHue / 360, s, v)
+        end
+        for _, key in ipairs(SECONDARY_COLOR_KEYS) do
+            local _, _, v = Themes.Dark[key]:ToHSV()
+            Theme[key] = Color3.fromHSV(secondaryHue / 360, SECONDARY_SATURATION, v)
+        end
+
+        recolorExistingInstances(before, Theme)
     end
-    pcall(function()
-        local ExploitGui = (gethui and gethui()) or game:GetService("CoreGui")
-        updateInstanceColor(ExploitGui:FindFirstChild("XiPriorityAlertTest"))
-    end)
+    _G.setUIColors = setUIColors
+
+    -- Debounced wrapper for slider drag callbacks: cheap to call every drag tick,
+    -- only actually recolors ~120ms after the user stops moving the slider.
+    function setUIColorsDebounced(primaryHue, secondaryHue)
+        if uiColorCommitThread then
+            pcall(task.cancel, uiColorCommitThread)
+        end
+        uiColorCommitThread = task.delay(0.12, function()
+            uiColorCommitThread = nil
+            setUIColors(primaryHue, secondaryHue)
+        end)
+    end
+    _G.setUIColorsDebounced = setUIColorsDebounced
 end
-
-function setUIColors(primaryHue, secondaryHue)
-    Config.PrimaryHue = primaryHue
-    Config.SecondaryHue = secondaryHue
-    saveConfig()
-
-    local before = {}
-    for _, key in ipairs(PRIMARY_COLOR_KEYS) do before[key] = Theme[key] end
-    for _, key in ipairs(SECONDARY_COLOR_KEYS) do before[key] = Theme[key] end
-
-    for _, key in ipairs(PRIMARY_COLOR_KEYS) do
-        local _, s, v = Themes.Dark[key]:ToHSV()
-        Theme[key] = Color3.fromHSV(primaryHue / 360, s, v)
-    end
-    for _, key in ipairs(SECONDARY_COLOR_KEYS) do
-        local _, _, v = Themes.Dark[key]:ToHSV()
-        Theme[key] = Color3.fromHSV(secondaryHue / 360, SECONDARY_SATURATION, v)
-    end
-
-    recolorExistingInstances(before, Theme)
-end
-_G.setUIColors = setUIColors
-
--- Debounced wrapper for slider drag callbacks: cheap to call every drag tick,
--- only actually recolors ~120ms after the user stops moving the slider.
-local function setUIColorsDebounced(primaryHue, secondaryHue)
-    if uiColorCommitThread then
-        pcall(task.cancel, uiColorCommitThread)
-    end
-    uiColorCommitThread = task.delay(0.12, function()
-        uiColorCommitThread = nil
-        setUIColors(primaryHue, secondaryHue)
-    end)
-end
-_G.setUIColorsDebounced = setUIColorsDebounced
 
 local UI = {Locked=false, OpenMenuKey=Enum.KeyCode.LeftControl, CurrentTab="Auto TP"}
 
@@ -6604,20 +6611,18 @@ local function IsBase(obj)
 	return false
 end
 
-local BARRIER_KEYWORDS = {"door", "gate", "barrier", "fence", "forcefield", "shield", "wall", "lock"}
-
-local function IsBaseBarrier(obj)
+function IsBaseBarrier(obj)
 	if not obj:IsA("BasePart") then return false end
 	local nameLower = obj.Name:lower()
-	for _, kw in ipairs(BARRIER_KEYWORDS) do
+	for _, kw in ipairs({"door", "gate", "barrier", "fence", "forcefield", "shield", "wall", "lock"}) do
 		if nameLower:find(kw, 1, true) then return true end
 	end
 	return false
 end
 
--- Catches base doors/barriers whose name doesn't match BARRIER_KEYWORDS
+-- Catches base doors/barriers whose name doesn't match the keyword list
 -- (e.g. auto-generated names) by their solid-red color instead.
-local function IsReddish(obj)
+function IsReddish(obj)
 	if not obj:IsA("BasePart") then return false end
 	local c = obj.Color
 	return c.R > 0.55 and c.G < 0.35 and c.B < 0.35
