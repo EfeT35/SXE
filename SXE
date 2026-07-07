@@ -676,6 +676,80 @@ function setRainbowMode(enabled)
 end
 _G.setRainbowMode = setRainbowMode
 
+-- CUSTOM UI COLORS: static primary (accent) / secondary (dark background) hue pickers.
+-- Mutates the live Theme table directly (so anything built from here on already
+-- picks up the new colors) and does a single recolor pass over existing instances
+-- by diffing against their pre-change color -- no tab rebuild, so it's safe to call
+-- mid-drag without breaking the slider's own input connection.
+local PRIMARY_COLOR_KEYS = RAINBOW_KEYS
+local SECONDARY_COLOR_KEYS = {"Background", "MainBackground", "Panel", "Row", "RowHover", "SoftButton", "SoftButtonHover", "ToggleOff", "ToggleOff2", "InputBg"}
+local SECONDARY_SATURATION = 0.35 -- keeps the background a visible dark tint (e.g. dark pink) instead of flat gray
+local uiColorCommitThread = nil
+
+local function recolorExistingInstances(before, after)
+    local function updateInstanceColor(inst)
+        if inst:IsA("GuiObject") or inst:IsA("UIStroke") then
+            for _, prop in ipairs({"BackgroundColor3", "TextColor3", "Color"}) do
+                local ok, current = pcall(function() return inst[prop] end)
+                if ok and typeof(current) == "Color3" then
+                    for key, oldColor in pairs(before) do
+                        if (current.R - oldColor.R)^2 + (current.G - oldColor.G)^2 + (current.B - oldColor.B)^2 < 0.0001 then
+                            inst[prop] = after[key]
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        for _, child in ipairs(inst:GetChildren()) do
+            updateInstanceColor(child)
+        end
+    end
+    pcall(function() updateInstanceColor(playerGui:FindFirstChild("SXEHub_V3")) end)
+    for _, name in ipairs({"SXE_RemoteSell", "SXE_StealProgressBar", "XiAdminPanel"}) do
+        pcall(function() updateInstanceColor(playerGui:FindFirstChild(name)) end)
+    end
+    pcall(function()
+        local ExploitGui = (gethui and gethui()) or game:GetService("CoreGui")
+        updateInstanceColor(ExploitGui:FindFirstChild("XiPriorityAlertTest"))
+    end)
+end
+
+function setUIColors(primaryHue, secondaryHue)
+    Config.PrimaryHue = primaryHue
+    Config.SecondaryHue = secondaryHue
+    saveConfig()
+
+    local before = {}
+    for _, key in ipairs(PRIMARY_COLOR_KEYS) do before[key] = Theme[key] end
+    for _, key in ipairs(SECONDARY_COLOR_KEYS) do before[key] = Theme[key] end
+
+    for _, key in ipairs(PRIMARY_COLOR_KEYS) do
+        local _, s, v = Themes.Dark[key]:ToHSV()
+        Theme[key] = Color3.fromHSV(primaryHue / 360, s, v)
+    end
+    for _, key in ipairs(SECONDARY_COLOR_KEYS) do
+        local _, _, v = Themes.Dark[key]:ToHSV()
+        Theme[key] = Color3.fromHSV(secondaryHue / 360, SECONDARY_SATURATION, v)
+    end
+
+    recolorExistingInstances(before, Theme)
+end
+_G.setUIColors = setUIColors
+
+-- Debounced wrapper for slider drag callbacks: cheap to call every drag tick,
+-- only actually recolors ~120ms after the user stops moving the slider.
+local function setUIColorsDebounced(primaryHue, secondaryHue)
+    if uiColorCommitThread then
+        pcall(task.cancel, uiColorCommitThread)
+    end
+    uiColorCommitThread = task.delay(0.12, function()
+        uiColorCommitThread = nil
+        setUIColors(primaryHue, secondaryHue)
+    end)
+end
+_G.setUIColorsDebounced = setUIColorsDebounced
+
 local UI = {Locked=false, OpenMenuKey=Enum.KeyCode.LeftControl, CurrentTab="Auto TP"}
 
 Keybinds = {
@@ -9289,6 +9363,10 @@ function loadTab(tabName)
         makeMainToggle(mainBody,"Priority Sound Alert",Config.PrioritySoundAlert,function(on) Config.PrioritySoundAlert=on; saveConfig() end)
         makeMainTextBox(mainBody,"Custom Sound ID",Config.PrioritySoundID or "e.g. 123456789","e.g. 123456789",function(v) Config.PrioritySoundID=v; saveConfig() end)
 
+        local defaultUIHue = select(1, Themes.Dark.Accent:ToHSV()) * 360
+        makeQuickSlider(mainBody,"Primary Color (Hue)",0,360,Config.PrimaryHue or defaultUIHue,function(v) setUIColorsDebounced(v, Config.SecondaryHue or defaultUIHue) end,"°")
+        makeQuickSlider(mainBody,"Secondary Color (Hue)",0,360,Config.SecondaryHue or defaultUIHue,function(v) setUIColorsDebounced(Config.PrimaryHue or defaultUIHue, v) end,"°")
+
     elseif tabName=="Misc" then
         -- NO Unwalk, NO Steal Speed, NO FPS Boost (moved to Performance)
         makeMainToggle(mainBody,"Instant Clone",true)
@@ -9744,6 +9822,10 @@ task.spawn(function() task.wait(0.5)
     if Config.FPSBoost then setFPSBoost(true) end
     if Config.FPSBoostUltra then setFPSBoostUltra(true) end
     if Config.RainbowMode then setRainbowMode(true) end
+    if Config.PrimaryHue or Config.SecondaryHue then
+        local defaultUIHue = select(1, Themes.Dark.Accent:ToHSV()) * 360
+        setUIColors(Config.PrimaryHue or defaultUIHue, Config.SecondaryHue or defaultUIHue)
+    end
     if Config.XRay then setXRay(true) end
     pcall(function() Workspace.CurrentCamera.FieldOfView = Config.FOV or 70 end)
     if Config.PlayerESP then playerESPEnabled=true end
