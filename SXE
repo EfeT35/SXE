@@ -6456,6 +6456,14 @@ local function IsBaseBarrier(obj)
 	return false
 end
 
+-- Catches base doors/barriers whose name doesn't match BARRIER_KEYWORDS
+-- (e.g. auto-generated names) by their solid-red color instead.
+local function IsReddish(obj)
+	if not obj:IsA("BasePart") then return false end
+	local c = obj.Color
+	return c.R > 0.55 and c.G < 0.35 and c.B < 0.35
+end
+
 local function IsInBase(obj)
 	local p = obj.Parent
 	while p and p ~= workspace do
@@ -6467,7 +6475,7 @@ end
 
 local function MakeTransparentUltra(obj)
 	pcall(function()
-		if (IsBase(obj) or IsBaseBarrier(obj)) and not IsCharacterPart(obj) then
+		if (IsBase(obj) or IsBaseBarrier(obj) or IsReddish(obj)) and not IsCharacterPart(obj) then
 			if OriginalTransparency[obj] == nil then
 				OriginalTransparency[obj] = {trans = obj.Transparency, shadow = obj.CastShadow}
 			end
@@ -6627,7 +6635,7 @@ local function setFPSBoostUltra(enabled)
             for j = i, batchEnd do
                 local obj = allDesc[j]
                 if obj and obj.Parent then
-                    if IsBase(obj) or IsBaseBarrier(obj) then
+                    if IsBase(obj) or IsBaseBarrier(obj) or IsReddish(obj) then
                         MakeTransparentUltra(obj)
                     elseif IsClothing(obj) then
                         SafeDestroyUltra(obj)
@@ -6652,7 +6660,7 @@ local function setFPSBoostUltra(enabled)
         AddUltraConnection(Workspace.DescendantAdded:Connect(function(obj)
             task.defer(function()
                 if not Config.FPSBoostUltra then return end
-                if IsBase(obj) or IsBaseBarrier(obj) then
+                if IsBase(obj) or IsBaseBarrier(obj) or IsReddish(obj) then
                     MakeTransparentUltra(obj)
                     return
                 end
