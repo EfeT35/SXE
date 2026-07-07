@@ -1596,7 +1596,10 @@ local function kickPlayer(stolenText)
         end)
         return
     end
-    pcall(function() game:Shutdown() end)
+    -- game:Shutdown() is a server-only API that tears down the whole game session
+    -- for every player; calling it from the client is undefined behavior and is
+    -- the likely cause of the client crashing on kick. Kick() alone is enough to
+    -- disconnect the local player.
     pcall(function() LocalPlayer:Kick("\nNANA HUB") end)
 end
 
