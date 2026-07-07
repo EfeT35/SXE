@@ -925,6 +925,7 @@ Config = {
     positions={},keybinds={},actions={},locked=false,
     DarkMode=false,
     RainbowMode=false,
+    ThiefRadar=false,
     AntiRagdoll=false,InfiniteJump=false,Float=false,
     AutoResetBalloon=false,AutoKickOnSteal=false,KickToPrivateServer=false,CleanErrorGUIs=false,
     LineToBase=false,LineToBrainrot=false,InvisStealAngle=225,SinkSliderValue=7,
@@ -1262,6 +1263,7 @@ local function initToggles()
     setToggle("Dark Mode", Config.DarkMode, true)
     setToggle("DarkMode", Config.DarkMode, true)
     setToggle("Rainbow UI", Config.RainbowMode, true)
+    setToggle("Thief Radar", Config.ThiefRadar, true)
     setToggle("Grabble TP", Config.TpSettings.GrabbleTP or false, true)
 end
 
@@ -6002,16 +6004,28 @@ local function makePlayerBillboard(plr)
     return bb,nameLbl
 end
 local function createOrRefreshPlayerESP(plr)
-    if plr==LocalPlayer then return end; local hrp=plr.Character and plr.Character:FindFirstChild("HumanoidRootPart"); if not hrp then return end
-    local hum=plr.Character:FindFirstChild("Humanoid"); if hum then hum.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None end
+    if plr==LocalPlayer then return end; local char=plr.Character; local hrp=char and char:FindFirstChild("HumanoidRootPart"); if not hrp then return end
+    local hum=char:FindFirstChild("Humanoid"); if hum then hum.DisplayDistanceType=Enum.HumanoidDisplayDistanceType.None end
     local uid=plr.UserId; local entry=playerBillboards[uid]
     if not entry or not entry.bb or not entry.bb.Parent then
         if entry and entry.bb then pcall(function() entry.bb:Destroy() end) end
-        local bb,nameLbl=makePlayerBillboard(plr); bb.Adornee=hrp; bb.Parent=hrp; playerBillboards[uid]={bb=bb,nameLbl=nameLbl,player=plr}
-    elseif entry.bb.Adornee~=hrp then entry.bb.Adornee=hrp; entry.bb.Parent=hrp end
+        if entry and entry.hl then pcall(function() entry.hl:Destroy() end) end
+        local bb,nameLbl=makePlayerBillboard(plr); bb.Adornee=hrp; bb.Parent=hrp
+        local hl=Instance.new("Highlight"); hl.Name="PlayerESP_Highlight"
+        hl.FillTransparency=0.15; hl.OutlineTransparency=0; hl.DepthMode=Enum.HighlightDepthMode.AlwaysOnTop
+        hl.Adornee=char; hl.Parent=char
+        playerBillboards[uid]={bb=bb,nameLbl=nameLbl,hl=hl,player=plr}
+    else
+        if entry.bb.Adornee~=hrp then entry.bb.Adornee=hrp; entry.bb.Parent=hrp end
+        if entry.hl and entry.hl.Adornee~=char then entry.hl.Adornee=char; entry.hl.Parent=char end
+    end
 end
 local function clearPlayerESP()
-    for uid,entry in pairs(playerBillboards) do if entry.bb then pcall(entry.bb.Destroy,entry.bb) end; playerBillboards[uid]=nil end
+    for uid,entry in pairs(playerBillboards) do
+        if entry.bb then pcall(entry.bb.Destroy,entry.bb) end
+        if entry.hl then pcall(entry.hl.Destroy,entry.hl) end
+        playerBillboards[uid]=nil
+    end
 end
 task.spawn(function() while true do task.wait(0.5)
     if playerESPEnabled then
@@ -6023,6 +6037,548 @@ task.spawn(function() while true do task.wait(0.5)
         end end
     else clearPlayerESP() end
 end end)
+-- Rainbow glow: cycles every Player ESP highlight through the hue wheel
+task.spawn(function() while true do task.wait(0.05)
+    if playerESPEnabled then
+        local col=Color3.fromHSV((tick()*0.2)%1,0.85,1)
+        for _,entry in pairs(playerBillboards) do
+            if entry.hl and entry.hl.Parent then
+                pcall(function() entry.hl.FillColor=col; entry.hl.OutlineColor=col end)
+            end
+        end
+    end
+end end)
+
+-- ============================================================
+-- THIEF RADAR (ported from ESP_TP_BASE.txt): highlights other players who are
+-- currently stealing and shows a floating panel with a "SLIDE TO BASE" button
+-- that glides you to their (now-undefended) base instead of an instant TP.
+-- Scoped in a do...end to stay out of the local-register budget.
+-- ============================================================
+do
+    local isSlidingTP = false
+    local thiefData = {}
+    local thiefScreenGuis = {}
+    local thiefEnabled = false
+    local thiefLoopThread = nil
+
+    local function slideToPosition(targetPos)
+        if isSlidingTP then return end
+        isSlidingTP = true
+
+        local char = LocalPlayer.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum then isSlidingTP = false; return end
+
+        pcall(equipCarpet)
+        pcall(function() hum.Jump = true end)
+        task.wait(0.12)
+
+        local fromPos = hrp.Position
+        local toBase  = targetPos - fromPos
+        local flatDir = Vector3.new(toBase.X, 0, toBase.Z)
+        local arrival
+        if flatDir.Magnitude > 20 then
+            arrival = targetPos - flatDir.Unit * 10
+            arrival = Vector3.new(arrival.X, targetPos.Y, arrival.Z)
+        else
+            arrival = Vector3.new(targetPos.X, targetPos.Y, targetPos.Z)
+        end
+
+        local endPos = arrival
+        local SPEED = 140
+        local FLOAT_H = 17
+        local DESCEND_DIST = 40
+        local maxTime = 25
+        local elapsed = 0
+        local lastPos = hrp.Position
+        local flyY = fromPos.Y + FLOAT_H
+        local landY = endPos.Y + 2.5
+
+        local function checkInput(dir)
+            local moved = hrp.Position - lastPos
+            local movedFlat = Vector3.new(moved.X, 0, moved.Z)
+            local expDir = Vector3.new(dir.X, 0, dir.Z)
+            if movedFlat.Magnitude > 0.05 and expDir.Magnitude > 0.1 then
+                if movedFlat.Unit:Dot(expDir.Unit) < -0.4 then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local attachment = Instance.new("Attachment")
+        attachment.Parent = hrp
+
+        local lv = Instance.new("LinearVelocity")
+        lv.Attachment0 = attachment
+        lv.MaxForce = 1e5
+        lv.RelativeTo = Enum.ActuatorRelativeTo.World
+        lv.VectorVelocity = Vector3.zero
+        lv.Parent = hrp
+
+        local conn
+        local function cleanup()
+            conn:Disconnect()
+            pcall(function() lv:Destroy() end)
+            pcall(function() attachment:Destroy() end)
+            isSlidingTP = false
+        end
+
+        conn = RunService.Heartbeat:Connect(function(dt)
+            elapsed = elapsed + dt
+            if not hrp or not hrp.Parent or elapsed >= maxTime then
+                cleanup(); return
+            end
+
+            local dir = endPos - hrp.Position
+            local distFlat = Vector3.new(dir.X, 0, dir.Z).Magnitude
+            local flatNorm = Vector3.new(dir.X, 0, dir.Z)
+            if flatNorm.Magnitude > 0.01 then flatNorm = flatNorm.Unit end
+
+            if distFlat < 2.5 then
+                lv.VectorVelocity = Vector3.zero
+                cleanup(); return
+            end
+
+            if checkInput(dir) then
+                lv.VectorVelocity = Vector3.zero
+                cleanup(); return
+            end
+            lastPos = hrp.Position
+
+            local currentY = hrp.Position.Y
+            local velY = 0
+
+            if distFlat > DESCEND_DIST then
+                local diffY = flyY - currentY
+                velY = (math.abs(diffY) > 0.5) and math.clamp(diffY * 6, -30, 40) or 0
+            else
+                local alpha = 1 - (distFlat / DESCEND_DIST)
+                local targetY = flyY + (landY - flyY) * alpha
+                local diffY = targetY - currentY
+                velY = math.clamp(diffY * 6, -40, 20)
+            end
+
+            lv.VectorVelocity = Vector3.new(flatNorm.X * SPEED, velY, flatNorm.Z * SPEED)
+        end)
+    end
+    _G.slideToPosition = slideToPosition
+
+    local function isStealingPlayer(player)
+        return player:GetAttribute("Stealing") == true or player:GetAttribute("IsStealing") == true
+    end
+
+    local function getPlotAdornee(plot)
+        if not plot then return nil end
+        local ps = plot:FindFirstChild("PlotSign")
+        if ps then
+            if ps:IsA("BasePart") then return ps end
+            local p = ps:FindFirstChildWhichIsA("BasePart", true)
+            if p then return p end
+        end
+        local base = plot:FindFirstChild("Base", true)
+        if base and base:IsA("BasePart") then return base end
+        if plot:IsA("Model") then
+            return plot.PrimaryPart or plot:FindFirstChildWhichIsA("BasePart", true)
+        end
+        return plot:IsA("BasePart") and plot or nil
+    end
+
+    local function findPlotForPlayer(player)
+        local plots = Workspace:FindFirstChild("Plots")
+        if not plots then return nil end
+        for _, data in ipairs(SharedState.AllAnimalsCache) do
+            if data.owner == player.Name or data.owner == player.DisplayName then
+                local plot = plots:FindFirstChild(data.plot)
+                if plot then return plot end
+            end
+        end
+        for _, plot in ipairs(plots:GetChildren()) do
+            local ov = plot:FindFirstChild("Owner") or plot:FindFirstChild("OwnerName")
+            if ov then
+                if ov:IsA("StringValue") and ov.Value:lower() == player.Name:lower() then return plot end
+                if ov:IsA("ObjectValue") and ov.Value == player then return plot end
+            end
+        end
+        return nil
+    end
+
+    local function findBrainrotModel(name)
+        local modelsFolder = ReplicatedStorage:FindFirstChild("Models")
+        local animalsFolder = modelsFolder and modelsFolder:FindFirstChild("Animals")
+        if not animalsFolder then return nil end
+        local searchName = name:lower():gsub("%s+", "")
+        for _, ch in ipairs(animalsFolder:GetChildren()) do
+            if ch:IsA("Model") then
+                local nl = ch.Name:lower():gsub("%s+", "")
+                if nl == searchName or nl:find(searchName, 1, true) or searchName:find(nl, 1, true) then
+                    return ch
+                end
+            end
+        end
+        return nil
+    end
+
+    local function setupBrainrotViewport(viewport, brainrotName)
+        for _, child in ipairs(viewport:GetChildren()) do
+            if not child:IsA("UIStroke") and not child:IsA("UICorner") then
+                pcall(function() child:Destroy() end)
+            end
+        end
+
+        local cam = Instance.new("Camera")
+        cam.FieldOfView = 32
+        cam.Parent = viewport
+        viewport.CurrentCamera = cam
+
+        local worldModel = Instance.new("WorldModel", viewport)
+
+        local srcModel = findBrainrotModel(brainrotName)
+        if not srcModel or not srcModel.Archivable then return false end
+
+        local ok, clone = pcall(function() return srcModel:Clone() end)
+        if not ok or not clone then return false end
+        clone.Parent = worldModel
+
+        for _, p in ipairs(clone:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.Anchored = true; p.CanCollide = false; p.CastShadow = false; p.LocalTransparencyModifier = 0
+            end
+        end
+
+        local camDist = 5
+        local centerY = 0
+        pcall(function()
+            local _, size = clone:GetBoundingBox()
+            clone:PivotTo(CFrame.new(0, 0, 0))
+            local maxDim = math.max(size.X, size.Y, size.Z, 1)
+            local halfFov = math.rad(cam.FieldOfView * 0.5)
+            camDist = math.max((maxDim * 0.6) / math.tan(halfFov), maxDim * 1.2, 3)
+            centerY = size.Y * 0.3
+        end)
+
+        local angle = 0
+        cam.CFrame = CFrame.new(Vector3.new(math.sin(angle) * camDist, centerY, math.cos(angle) * camDist), Vector3.new(0, centerY, 0))
+
+        task.spawn(function()
+            while clone and clone.Parent and viewport and viewport.Parent do
+                angle = angle + math.rad(1.8)
+                cam.CFrame = CFrame.new(Vector3.new(math.sin(angle) * camDist, centerY, math.cos(angle) * camDist), Vector3.new(0, centerY, 0))
+                task.wait(0.03)
+            end
+        end)
+
+        return true
+    end
+
+    local function makeThiefPanel(player, plot, adornee)
+        local oldGui = thiefScreenGuis[player.UserId]
+        if oldGui then pcall(function() oldGui:Destroy() end) end
+
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "ThiefRadarPanel_" .. player.UserId
+        sg.ResetOnSpawn = false
+        sg.IgnoreGuiInset = true
+        sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        sg.DisplayOrder = 999
+        sg.Parent = playerGui
+        thiefScreenGuis[player.UserId] = sg
+
+        local PANEL_W, PANEL_H = 210, 148
+
+        local frame = Instance.new("Frame", sg)
+        frame.Name = "Panel"
+        frame.Size = UDim2.fromOffset(PANEL_W, PANEL_H)
+        frame.AnchorPoint = Vector2.new(0.5, 1)
+        frame.Position = UDim2.fromOffset(0, 0)
+        frame.BackgroundColor3 = Color3.fromRGB(10, 8, 18)
+        frame.BackgroundTransparency = 0.08
+        frame.BorderSizePixel = 0
+        frame.Active = true
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+
+        local stroke = Instance.new("UIStroke", frame)
+        stroke.Color = Color3.fromRGB(255, 35, 120)
+        stroke.Thickness = 1.5
+        stroke.Transparency = 0.2
+
+        local header = Instance.new("TextLabel", frame)
+        header.Size = UDim2.new(1, -10, 0, 20)
+        header.Position = UDim2.fromOffset(5, 5)
+        header.BackgroundTransparency = 1
+        header.Font = Enum.Font.GothamBlack
+        header.TextSize = 12
+        header.TextColor3 = Color3.fromRGB(255, 35, 120)
+        header.TextXAlignment = Enum.TextXAlignment.Left
+        header.TextTruncate = Enum.TextTruncate.AtEnd
+        header.Text = "⚠ " .. player.DisplayName .. " is STEALING"
+
+        local sep = Instance.new("Frame", frame)
+        sep.Size = UDim2.new(1, -10, 0, 1); sep.Position = UDim2.fromOffset(5, 28)
+        sep.BackgroundColor3 = Color3.fromRGB(255, 35, 120); sep.BackgroundTransparency = 0.5
+        sep.BorderSizePixel = 0
+
+        local brainrotZone = Instance.new("Frame", frame)
+        brainrotZone.Size = UDim2.new(1, -10, 0, 70)
+        brainrotZone.Position = UDim2.fromOffset(5, 33)
+        brainrotZone.BackgroundTransparency = 1
+
+        local viewport = Instance.new("ViewportFrame", brainrotZone)
+        viewport.Name = "BrainrotViewport"
+        viewport.Size = UDim2.fromOffset(60, 60)
+        viewport.Position = UDim2.fromOffset(0, 5)
+        viewport.BackgroundColor3 = Color3.fromRGB(15, 10, 25)
+        viewport.BackgroundTransparency = 0.3
+        viewport.LightColor = Color3.new(1, 1, 1)
+        viewport.Ambient = Color3.fromRGB(180, 180, 180)
+        viewport.LightDirection = Vector3.new(-0.3, -0.5, -0.3)
+        viewport.BorderSizePixel = 0
+        Instance.new("UICorner", viewport).CornerRadius = UDim.new(0, 8)
+        local vpStroke = Instance.new("UIStroke", viewport)
+        vpStroke.Color = Color3.fromRGB(255, 35, 120); vpStroke.Thickness = 1.2; vpStroke.Transparency = 0.4
+
+        local vpFallback = Instance.new("TextLabel", viewport)
+        vpFallback.Name = "Fallback"
+        vpFallback.Size = UDim2.fromScale(1, 1)
+        vpFallback.BackgroundTransparency = 1
+        vpFallback.Text = "?"
+        vpFallback.Font = Enum.Font.GothamBlack
+        vpFallback.TextSize = 22
+        vpFallback.TextColor3 = Color3.fromRGB(255, 35, 120)
+
+        local brainrotName = Instance.new("TextLabel", brainrotZone)
+        brainrotName.Name = "BrainrotName"
+        brainrotName.Size = UDim2.new(1, -70, 0, 20)
+        brainrotName.Position = UDim2.fromOffset(65, 8)
+        brainrotName.BackgroundTransparency = 1
+        brainrotName.Font = Enum.Font.GothamBold
+        brainrotName.TextSize = 12
+        brainrotName.TextColor3 = Color3.new(1, 1, 1)
+        brainrotName.TextXAlignment = Enum.TextXAlignment.Left
+        brainrotName.TextTruncate = Enum.TextTruncate.AtEnd
+        brainrotName.Text = "Watching..."
+
+        local brainrotGen = Instance.new("TextLabel", brainrotZone)
+        brainrotGen.Name = "BrainrotGen"
+        brainrotGen.Size = UDim2.new(1, -70, 0, 18)
+        brainrotGen.Position = UDim2.fromOffset(65, 30)
+        brainrotGen.BackgroundTransparency = 1
+        brainrotGen.Font = Enum.Font.GothamBold
+        brainrotGen.TextSize = 13
+        brainrotGen.TextColor3 = Color3.fromRGB(0, 255, 150)
+        brainrotGen.TextXAlignment = Enum.TextXAlignment.Left
+        brainrotGen.Text = ""
+
+        local brainrotMut = Instance.new("TextLabel", brainrotZone)
+        brainrotMut.Name = "BrainrotMut"
+        brainrotMut.Size = UDim2.new(1, -70, 0, 16)
+        brainrotMut.Position = UDim2.fromOffset(65, 50)
+        brainrotMut.BackgroundTransparency = 1
+        brainrotMut.Font = Enum.Font.GothamBold
+        brainrotMut.TextSize = 10
+        brainrotMut.TextColor3 = Color3.fromRGB(200, 150, 255)
+        brainrotMut.TextXAlignment = Enum.TextXAlignment.Left
+        brainrotMut.Text = ""
+
+        local tpBtn = Instance.new("TextButton", frame)
+        tpBtn.Name = "SlideTPBtn"
+        tpBtn.Size = UDim2.new(1, -10, 0, 28)
+        tpBtn.Position = UDim2.fromOffset(5, 108)
+        tpBtn.BackgroundColor3 = Color3.fromRGB(55, 15, 95)
+        tpBtn.BorderSizePixel = 0
+        tpBtn.AutoButtonColor = false
+        tpBtn.Font = Enum.Font.GothamBlack
+        tpBtn.TextSize = 12
+        tpBtn.TextColor3 = Color3.new(1, 1, 1)
+        tpBtn.Text = "🏄  SLIDE TO BASE"
+        Instance.new("UICorner", tpBtn).CornerRadius = UDim.new(0, 7)
+        local btnStroke = Instance.new("UIStroke", tpBtn)
+        btnStroke.Color = Color3.fromRGB(180, 80, 255); btnStroke.Thickness = 1.2; btnStroke.Transparency = 0.3
+
+        tpBtn.MouseEnter:Connect(function()
+            TweenService:Create(tpBtn, TweenInfo.new(0.12), {BackgroundColor3 = Color3.fromRGB(90, 30, 160)}):Play()
+        end)
+        tpBtn.MouseLeave:Connect(function()
+            if not isSlidingTP then
+                TweenService:Create(tpBtn, TweenInfo.new(0.12), {BackgroundColor3 = Color3.fromRGB(55, 15, 95)}):Play()
+            end
+        end)
+        tpBtn.MouseButton1Click:Connect(function()
+            if isSlidingTP then return end
+            tpBtn.Text = "🏄  SLIDING..."
+            tpBtn.BackgroundColor3 = Color3.fromRGB(30, 8, 55)
+            task.spawn(function()
+                local targetPos = nil
+                if plot and plot.Parent then
+                    local plotSign = plot:FindFirstChild("PlotSign")
+                    local signPart = plotSign and ((plotSign:IsA("BasePart") and plotSign) or plotSign:FindFirstChildWhichIsA("BasePart", true))
+                    if signPart then
+                        local forward = signPart.CFrame.LookVector
+                        targetPos = signPart.Position + forward * 6
+                    end
+                    if not targetPos then
+                        pcall(function() targetPos = plot:GetPivot().Position end)
+                    end
+                end
+                if not targetPos then
+                    tpBtn.Text = "🏄  SLIDE TO BASE"
+                    tpBtn.BackgroundColor3 = Color3.fromRGB(55, 15, 95)
+                    return
+                end
+                slideToPosition(targetPos)
+                while isSlidingTP do task.wait(0.1) end
+                if tpBtn and tpBtn.Parent then
+                    tpBtn.Text = "🏄  SLIDE TO BASE"
+                    tpBtn.BackgroundColor3 = Color3.fromRGB(55, 15, 95)
+                end
+            end)
+        end)
+
+        local lastBrainrotName = nil
+        task.spawn(function()
+            while sg and sg.Parent do
+                task.wait(0.4)
+                if not sg or not sg.Parent then break end
+                local stealIdx = player:GetAttribute("StealingIndex") or player:GetAttribute("StealTarget") or player:GetAttribute("CurrentBrainrot")
+                if stealIdx then
+                    local displayName = tostring(stealIdx)
+                    if brainrotName and brainrotName.Parent then brainrotName.Text = displayName end
+                    local genText, mutText = "", ""
+                    local searchLow = displayName:lower()
+                    for _, pet in ipairs(SharedState.AllAnimalsCache) do
+                        if pet.name and pet.name:lower():find(searchLow, 1, true) then
+                            genText = pet.genText or ""
+                            mutText = (pet.mutation and pet.mutation ~= "None") and pet.mutation or ""
+                            break
+                        end
+                    end
+                    if brainrotGen and brainrotGen.Parent then brainrotGen.Text = genText end
+                    if brainrotMut and brainrotMut.Parent then
+                        brainrotMut.Text = mutText ~= "" and ("✦ " .. mutText) or ""
+                    end
+                    if displayName ~= lastBrainrotName then
+                        lastBrainrotName = displayName
+                        local wm = viewport:FindFirstChildOfClass("WorldModel")
+                        if wm then wm:Destroy() end
+                        task.spawn(function()
+                            local success = setupBrainrotViewport(viewport, displayName)
+                            if vpFallback and vpFallback.Parent then vpFallback.Visible = not success end
+                        end)
+                    end
+                else
+                    if brainrotName and brainrotName.Parent then brainrotName.Text = "Watching..." end
+                end
+            end
+        end)
+
+        task.spawn(function()
+            local cam = Workspace.CurrentCamera
+            while sg and sg.Parent do
+                task.wait(0.03)
+                if not sg.Parent then break end
+                if adornee and adornee.Parent and cam then
+                    local worldPos = adornee.Position + Vector3.new(0, 5, 0)
+                    local screenPos, onScreen = cam:WorldToViewportPoint(worldPos)
+                    if onScreen then
+                        frame.Visible = true
+                        frame.Position = UDim2.fromOffset(
+                            math.clamp(screenPos.X, PANEL_W/2 + 5, cam.ViewportSize.X - PANEL_W/2 - 5),
+                            math.clamp(screenPos.Y, PANEL_H + 5, cam.ViewportSize.Y - 5)
+                        )
+                    else
+                        frame.Visible = false
+                    end
+                else
+                    frame.Visible = false
+                end
+            end
+        end)
+
+        return sg
+    end
+
+    local function makeThiefESP(player, plot)
+        local adornee = getPlotAdornee(plot)
+        if not adornee then return nil end
+
+        local highlight = Instance.new("Highlight")
+        highlight.Name = "ThiefRadarESP_Highlight"
+        highlight.Adornee = (plot:IsA("Model") or plot:IsA("BasePart")) and plot or adornee
+        highlight.FillColor = Color3.fromRGB(255, 35, 120)
+        highlight.OutlineColor = Color3.new(1, 1, 1)
+        highlight.FillTransparency = 0.45
+        highlight.OutlineTransparency = 0
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = plot
+
+        local billboard = makeThiefPanel(player, plot, adornee)
+        return {highlight = highlight, billboard = billboard, plot = plot}
+    end
+
+    local function clearThiefESP()
+        for player, data in pairs(thiefData) do
+            if data.highlight then pcall(function() data.highlight:Destroy() end) end
+            if data.billboard then pcall(function() data.billboard:Destroy() end) end
+            thiefData[player] = nil
+        end
+        for uid, sg in pairs(thiefScreenGuis) do
+            if sg then pcall(function() sg:Destroy() end) end
+            thiefScreenGuis[uid] = nil
+        end
+    end
+
+    local function refreshThiefESP()
+        local seen = {}
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and isStealingPlayer(player) then
+                local plot = findPlotForPlayer(player)
+                if plot then
+                    seen[player] = true
+                    local entry = thiefData[player]
+                    if not entry or entry.plot ~= plot or not entry.billboard or not entry.billboard.Parent then
+                        if entry then
+                            if entry.highlight then pcall(function() entry.highlight:Destroy() end) end
+                            if entry.billboard then pcall(function() entry.billboard:Destroy() end) end
+                        end
+                        thiefData[player] = makeThiefESP(player, plot)
+                    end
+                end
+            end
+        end
+        for player, data in pairs(thiefData) do
+            if not seen[player] or not player.Parent then
+                if data.highlight then pcall(function() data.highlight:Destroy() end) end
+                if data.billboard then pcall(function() data.billboard:Destroy() end) end
+                thiefData[player] = nil
+                local sg = thiefScreenGuis[player.UserId]
+                if sg then pcall(function() sg:Destroy() end) end
+                thiefScreenGuis[player.UserId] = nil
+            end
+        end
+    end
+
+    function setThiefRadar(enabled)
+        Config.ThiefRadar = enabled
+        saveConfig()
+        setToggle("Thief Radar", enabled)
+        thiefEnabled = enabled
+        if not enabled then
+            clearThiefESP()
+            return
+        end
+        if thiefLoopThread then return end
+        thiefLoopThread = task.spawn(function()
+            while thiefEnabled do
+                pcall(refreshThiefESP)
+                task.wait(0.4)
+            end
+            thiefLoopThread = nil
+        end)
+    end
+    _G.setThiefRadar = setThiefRadar
+end
 
 -- Line To Base ESP (kinqs beam style)
 do
@@ -9271,6 +9827,7 @@ function loadTab(tabName)
             if on then -- beam auto-creates via heartbeat
             else if _G.resetBrainrotBeam then pcall(_G.resetBrainrotBeam) end end
         end)
+        makeMainToggle(mainBody,"Thief Radar (Slide TP)",Config.ThiefRadar,function(on) if _G.setThiefRadar then _G.setThiefRadar(on) end end)
 
     elseif tabName=="UI" then
         for _,name in ipairs({"Invisible Steal Panel","Admin Command Panel","Command Cooldowns","Actions","Steal Panel","Steal Target"}) do
@@ -9829,6 +10386,7 @@ task.spawn(function() task.wait(0.5)
     if Config.FPSBoost then setFPSBoost(true) end
     if Config.FPSBoostUltra then setFPSBoostUltra(true) end
     if Config.RainbowMode then setRainbowMode(true) end
+    if Config.ThiefRadar then setThiefRadar(true) end
     if Config.PrimaryHue or Config.SecondaryHue then
         local defaultUIHue = select(1, Themes.Dark.Accent:ToHSV()) * 360
         setUIColors(Config.PrimaryHue or defaultUIHue, Config.SecondaryHue or defaultUIHue)
