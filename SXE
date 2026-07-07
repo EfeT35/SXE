@@ -68,14 +68,26 @@ GUID = GUID or _G.SXE_RESET_GUID or _newGUID()
 resetRemote = nil
 instaResetCooldown = false
 
+-- Rolling window of recently-fired RE/* remotes, so we can confirm which one
+-- actually causes a reset instead of blindly locking onto the first one seen
+-- (see the CharacterAdded correlation below).
+local _recentReFires = {}
+
 local old; old = hookfunction(Instance.new("RemoteEvent").FireServer, function(self, ...)
     local args = {...}
     local arg1 = args[1]
 
-    -- Capture the first RE/* remote the game itself fires -- that's the reset
-    -- target for instareset() below.
-    if not resetRemote and self.Name:sub(1, 3) == "RE/" then
-        resetRemote = self
+    if self.Name:sub(1, 3) == "RE/" then
+        local now = os.clock()
+        table.insert(_recentReFires, {remote = self, time = now})
+        while #_recentReFires > 0 and now - _recentReFires[1].time > 3 do
+            table.remove(_recentReFires, 1)
+        end
+        -- Provisional guess so instantReset() has something to try immediately;
+        -- gets replaced with a confirmed remote once we actually observe a respawn.
+        if not resetRemote then
+            resetRemote = self
+        end
     end
 
     if #self.Name == 67 and arg1 and typeof(arg1) == "string" then
@@ -85,6 +97,22 @@ local old; old = hookfunction(Instance.new("RemoteEvent").FireServer, function(s
         end
     end
     return old(self, ...)
+end)
+
+-- Confirm the guessed reset remote against an actual observed respawn: whichever
+-- RE/* remote fired in the couple seconds right before the character respawned is
+-- the one really doing the resetting. Re-runs on every respawn, so a bad initial
+-- guess (grabbed from unrelated game traffic) gets corrected instead of staying
+-- wrong for the whole session -- that's why reset only used to work "sometimes".
+LocalPlayer.CharacterAdded:Connect(function()
+    local now = os.clock()
+    for i = #_recentReFires, 1, -1 do
+        local entry = _recentReFires[i]
+        if now - entry.time <= 3 then
+            resetRemote = entry.remote
+            break
+        end
+    end
 end)
 
 -- LPH_NO_VIRTUALIZE: real preprocessor directive under Luraph; harmless passthrough
@@ -246,8 +274,8 @@ end
 Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(setupCameraListener)
 task.spawn(setupCameraListener)
 
-local old = playerGui:FindFirstChild("NanaHub_V3"); if old then old:Destroy() end
-local gui_sg = Instance.new("ScreenGui"); gui_sg.Name = "NanaHub_V3"; gui_sg.ResetOnSpawn = false; gui_sg.IgnoreGuiInset = true; gui_sg.DisplayOrder = 9999999; gui_sg.Parent = playerGui
+local old = playerGui:FindFirstChild("SXEHub_V3"); if old then old:Destroy() end
+local gui_sg = Instance.new("ScreenGui"); gui_sg.Name = "SXEHub_V3"; gui_sg.ResetOnSpawn = false; gui_sg.IgnoreGuiInset = true; gui_sg.DisplayOrder = 9999999; gui_sg.Parent = playerGui
 local gui = registerScreenGui(gui_sg)
 
 -- SHARED TOGGLE STATE
@@ -272,31 +300,31 @@ local Config
 local saveConfig
 local loadConfig
 
--- THEME (NANA Violet)
+-- THEME (SXE Pink)
 Themes = {
     Light = {
-        Background=Color3.fromRGB(255,255,255), MainBackground=Color3.fromRGB(252,251,255),
-        Panel=Color3.fromRGB(250,248,255), Row=Color3.fromRGB(245,242,253), RowHover=Color3.fromRGB(238,233,251),
-        Accent=Color3.fromRGB(130,97,224), AccentLight=Color3.fromRGB(151,118,240),
-        Green=Color3.fromRGB(105,196,160), Red=Color3.fromRGB(224,110,140), Red2=Color3.fromRGB(204,88,122),
-        Text=Color3.fromRGB(107,84,189), Dim=Color3.fromRGB(160,151,190), Stroke=Color3.fromRGB(206,193,240),
-        SoftButton=Color3.fromRGB(243,240,252), SoftButtonHover=Color3.fromRGB(236,231,249),
-        SoftAccent=Color3.fromRGB(228,220,247), SoftAccentHover=Color3.fromRGB(217,206,244),
-        ToggleOff=Color3.fromRGB(236,231,251), ToggleOff2=Color3.fromRGB(240,236,252),
-        InputBg=Color3.fromRGB(255,255,255), SliderBg=Color3.fromRGB(213,199,241),
-        BlacklistHover=Color3.fromRGB(250,215,222), BlacklistLeave=Color3.fromRGB(245,238,252),
+        Background=Color3.fromRGB(255,255,255), MainBackground=Color3.fromRGB(255,252,255),
+        Panel=Color3.fromRGB(255,249,252), Row=Color3.fromRGB(252,245,249), RowHover=Color3.fromRGB(250,238,245),
+        Accent=Color3.fromRGB(232,111,177), AccentLight=Color3.fromRGB(238,98,178),
+        Green=Color3.fromRGB(235,117,181), Red=Color3.fromRGB(237,150,189), Red2=Color3.fromRGB(220,104,162),
+        Text=Color3.fromRGB(236,108,174), Dim=Color3.fromRGB(205,151,180), Stroke=Color3.fromRGB(248,188,219),
+        SoftButton=Color3.fromRGB(249,240,245), SoftButtonHover=Color3.fromRGB(246,232,240),
+        SoftAccent=Color3.fromRGB(244,223,233), SoftAccentHover=Color3.fromRGB(241,213,228),
+        ToggleOff=Color3.fromRGB(255,231,243), ToggleOff2=Color3.fromRGB(255,236,245),
+        InputBg=Color3.fromRGB(255,255,255), SliderBg=Color3.fromRGB(243,204,223),
+        BlacklistHover=Color3.fromRGB(255,220,225), BlacklistLeave=Color3.fromRGB(255,240,248),
     },
     Dark = {
-        Background=Color3.fromRGB(18,17,22), MainBackground=Color3.fromRGB(13,12,17),
-        Panel=Color3.fromRGB(26,24,32), Row=Color3.fromRGB(32,29,40), RowHover=Color3.fromRGB(43,37,54),
-        Accent=Color3.fromRGB(151,118,240), AccentLight=Color3.fromRGB(171,143,247),
-        Green=Color3.fromRGB(105,196,160), Red=Color3.fromRGB(224,110,140), Red2=Color3.fromRGB(204,88,122),
-        Text=Color3.fromRGB(255,255,255), Dim=Color3.fromRGB(190,185,205), Stroke=Color3.fromRGB(58,48,80),
-        SoftButton=Color3.fromRGB(32,28,40), SoftButtonHover=Color3.fromRGB(41,35,51),
-        SoftAccent=Color3.fromRGB(50,40,64), SoftAccentHover=Color3.fromRGB(60,47,76),
-        ToggleOff=Color3.fromRGB(32,28,40), ToggleOff2=Color3.fromRGB(32,28,40),
-        InputBg=Color3.fromRGB(26,23,32), SliderBg=Color3.fromRGB(53,42,72),
-        BlacklistHover=Color3.fromRGB(80,35,45), BlacklistLeave=Color3.fromRGB(48,38,52),
+        Background=Color3.fromRGB(20,20,20), MainBackground=Color3.fromRGB(15,15,15),
+        Panel=Color3.fromRGB(28,25,28), Row=Color3.fromRGB(35,30,35), RowHover=Color3.fromRGB(48,38,48),
+        Accent=Color3.fromRGB(232,111,177), AccentLight=Color3.fromRGB(238,98,178),
+        Green=Color3.fromRGB(235,117,181), Red=Color3.fromRGB(237,150,189), Red2=Color3.fromRGB(220,104,162),
+        Text=Color3.fromRGB(255,255,255), Dim=Color3.fromRGB(200,200,200), Stroke=Color3.fromRGB(60,40,55),
+        SoftButton=Color3.fromRGB(35,28,33), SoftButtonHover=Color3.fromRGB(45,35,42),
+        SoftAccent=Color3.fromRGB(55,38,48), SoftAccentHover=Color3.fromRGB(65,45,58),
+        ToggleOff=Color3.fromRGB(35,28,33), ToggleOff2=Color3.fromRGB(35,28,33),
+        InputBg=Color3.fromRGB(30,25,30), SliderBg=Color3.fromRGB(55,40,50),
+        BlacklistHover=Color3.fromRGB(80,35,45), BlacklistLeave=Color3.fromRGB(50,35,45),
     }
 }
 Theme = {}
@@ -348,7 +376,7 @@ function applyTheme(themeName)
             if child:IsA("UIStroke") then
                 child.Color = toTheme.AccentLight
             elseif child:IsA("TextLabel") then
-                if child.Text == "NANA HUB" then
+                if child.Text == "SXE HUB PRIVAT" or child.Text == "|" or child.Text == "discord.gg/sxehub" then
                     child.TextColor3 = toTheme.AccentLight
                 elseif child.Text == "By:@SE67 and @SXLVATORE" then
                     child.TextColor3 = toTheme.Dim
@@ -485,7 +513,7 @@ function applyTheme(themeName)
     end
     
     pcall(function()
-        local sg = playerGui:FindFirstChild("NanaHub_V3")
+        local sg = playerGui:FindFirstChild("SXEHub_V3")
         if sg then updateInstanceColors(sg) end
         if _G.updateLogoImage then
             _G.updateLogoImage(themeName == "Dark")
@@ -521,7 +549,7 @@ function applyTheme(themeName)
     end
     
     pcall(function()
-        local sg = playerGui:FindFirstChild("NanaHub_V3")
+        local sg = playerGui:FindFirstChild("SXEHub_V3")
         if sg then forceWhiteText(sg) end
     end)
     
@@ -1591,8 +1619,11 @@ local function kickPlayer(stolenText)
         end)
         return
     end
-    pcall(function() game:Shutdown() end)
-    pcall(function() LocalPlayer:Kick("\nNANA HUB") end)
+    -- game:Shutdown() is a server-only API that tears down the whole game session
+    -- for every player; calling it from the client is undefined behavior and is
+    -- the likely cause of the client crashing on kick. Kick() alone is enough to
+    -- disconnect the local player.
+    pcall(function() LocalPlayer:Kick("\nSXE HUB PRIVAT") end)
 end
 
 -- SHARED STATE
@@ -1817,12 +1848,32 @@ local function instantReset()
     local lp = LocalPlayer
     local oldChar = lp.Character
     task.spawn(function()
+        if _G.invisibleStealEnabled and _G.toggleInvisibleSteal then
+            -- The real HumanoidRootPart is detached from the character and parented
+            -- to the camera while invisible steal is on, so the server sees a broken
+            -- character hierarchy and silently rejects the reset request. Restore the
+            -- normal character first.
+            pcall(_G.toggleInvisibleSteal)
+            task.wait(0.15)
+        end
         local t0 = os.clock()
         -- if the reset remote hasn't been captured yet, wait briefly for it
         while not resetRemote and (os.clock() - t0) < 3 do task.wait() end
         while resetRemote and lp.Character == oldChar and (os.clock() - t0) < 8 do
             pcall(function() resetRemote:FireServer("randomstring") end)
             task.wait()
+        end
+        -- The character never actually changed -- our guessed remote doesn't do the
+        -- reset, so drop it instead of spamming the same dead remote every time.
+        -- The next respawn (natural death, native reset button, etc.) will let the
+        -- CharacterAdded correlation above pick a better candidate.
+        if lp.Character == oldChar then
+            resetRemote = nil
+            -- This button used to just be the game's native reset before we took over
+            -- ResetButtonCallback, so falling back to it means pressing Reset still
+            -- actually respawns you even on the runs where our guessed remote is wrong,
+            -- instead of silently doing nothing.
+            pcall(function() lp:LoadCharacter() end)
         end
         instaResetCooldown = false
     end)
@@ -7737,9 +7788,8 @@ _G.HideStealProgressBar = function()
 end
 
 -- Assign helper implementations to pre-declared outer local variables
--- scaled up ~40% across the board for a rounder, softer look than SXE's
-corner = function(o,r) local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,math.floor(r*1.4+0.5)); c.Parent=o; return c end
-stroke = function(o,col,th,tr) local s=Instance.new("UIStroke"); s.Color=col or Theme.Stroke; s.Thickness=(th or 1)+0.5; s.Transparency=tr or 0; s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; s.Parent=o; return s end
+corner = function(o,r) local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r); c.Parent=o; return c end
+stroke = function(o,col,th,tr) local s=Instance.new("UIStroke"); s.Color=col or Theme.Stroke; s.Thickness=th or 1; s.Transparency=tr or 0; s.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; s.Parent=o; return s end
 tw = function(o,p,t) TweenService:Create(o,TweenInfo.new(t or 0.14,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),p):Play() end
 addOutline = function(f) local o=Instance.new("UIStroke"); o.Color=Theme.AccentLight; o.Thickness=1.25; o.Transparency=0.08; o.ApplyStrokeMode=Enum.ApplyStrokeMode.Border; o.Parent=f; return o end
 function clearBody(body) for _,c in ipairs(body:GetChildren()) do if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end end end
@@ -7800,8 +7850,8 @@ end
 
 function makeHeader(f,t,isMain) local h=Instance.new("Frame"); h.Size=UDim2.new(1,0,0,42); h.BackgroundTransparency=1; h.Parent=f
     local parts={}; for s in string.gmatch(t,"([^\n]+)") do table.insert(parts,s) end
-    if isMain then local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,-50,0,24); l.Position=UDim2.new(0,13,0,8); l.BackgroundTransparency=1; l.Text=parts[1] or "NANA HUB"; l.TextColor3=Theme.Text; l.Font=Enum.Font.GothamBlack; l.TextSize=16; l.TextXAlignment=Enum.TextXAlignment.Left; l.Parent=h
-    else local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,-58,0,16); l.Position=UDim2.new(0,12,0,7); l.BackgroundTransparency=1; l.Text=parts[1] or "NANA HUB"; l.TextColor3=Theme.Text; l.Font=Enum.Font.GothamBlack; l.TextSize=12; l.TextXAlignment=Enum.TextXAlignment.Center; l.Parent=h
+    if isMain then local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,-50,0,24); l.Position=UDim2.new(0,13,0,8); l.BackgroundTransparency=1; l.Text=parts[1] or "SXE HUB PRIVAT"; l.TextColor3=Theme.Text; l.Font=Enum.Font.GothamBlack; l.TextSize=16; l.TextXAlignment=Enum.TextXAlignment.Left; l.Parent=h
+    else local l=Instance.new("TextLabel"); l.Size=UDim2.new(1,-58,0,16); l.Position=UDim2.new(0,12,0,7); l.BackgroundTransparency=1; l.Text=parts[1] or "SXE HUB PRIVAT"; l.TextColor3=Theme.Text; l.Font=Enum.Font.GothamBlack; l.TextSize=12; l.TextXAlignment=Enum.TextXAlignment.Center; l.Parent=h
         local s=Instance.new("TextLabel"); s.Size=UDim2.new(1,-58,0,13); s.Position=UDim2.new(0,12,0,21); s.BackgroundTransparency=1; s.Text=parts[2] or ""; s.TextColor3=Theme.Dim; s.Font=Enum.Font.GothamMedium; s.TextSize=10; s.TextXAlignment=Enum.TextXAlignment.Center; s.Parent=h end
     local d=Instance.new("Frame"); d.Size=UDim2.new(1,-24,0,1); d.Position=UDim2.new(0,12,0,40); d.BackgroundColor3=Theme.AccentLight; d.BackgroundTransparency=isMain and 0.25 or 0.04; d.BorderSizePixel=0; d.Parent=f
     makeDraggable(f,h,t); return h end
@@ -8012,24 +8062,24 @@ function makeKeybindRow(parent,nameText)
 end
 
 -- CREATE PANELS
-main,mainBody=makeMainPanel("NANA HUB",UDim2.new(0,375,0,480),UDim2.new(0.5,-187,0.5,-255))
+main,mainBody=makeMainPanel("SXE HUB PRIVAT",UDim2.new(0,375,0,480),UDim2.new(0.5,-187,0.5,-255))
 if Config.AutoCloseOnExec then main.Visible = false end
-panels["Invisible Steal Panel"],panels["InvisStealBody"]=makeQuickPanel("NANA HUB\nInvisible Steal",UDim2.new(0,230,0,375),UDim2.new(0,80,0.5,-220))
+panels["Invisible Steal Panel"],panels["InvisStealBody"]=makeQuickPanel("SXE HUB PRIVAT\nInvisible Steal",UDim2.new(0,230,0,375),UDim2.new(0,80,0.5,-220))
 panels["InvisStealBody"].ScrollBarThickness = 0
 panels["InvisStealBody"].ScrollingEnabled = false
-panels["Admin Command Panel"],panels["AdminBody"]=makeQuickPanel("NANA HUB\nAdmin Command Panel",UDim2.new(0,225,0,240),UDim2.new(0.5,85,1,-340))
-panels["Command Cooldowns"],panels["CooldownBody"]=makeQuickPanel("NANA HUB\nCommand Cooldowns",UDim2.new(0,210,0,315),UDim2.new(0.5,245,1,-390))
-panels["Actions"],panels["ActionsBody"]=makeQuickPanel("NANA HUB\nActions",UDim2.new(0,230,0,340),UDim2.new(0.5,505,1,-415))
-panels["Steal Panel"],panels["StealBody"]=makeQuickPanel("NANA HUB\nSteal Panel",UDim2.new(0,235,0,300),UDim2.new(1,-300,1,-385))
-panels["Steal Target"],panels["TargetBody"]=makeQuickPanel("NANA HUB\nSteal Target",UDim2.new(0,320,0,380),UDim2.new(1,-330,0,85))
-actionSettingsPanel,actionSettingsBody=makeQuickPanel("NANA HUB\nAction Settings",UDim2.new(0,230,0,370),UDim2.new(0.5,745,1,-440))
+panels["Admin Command Panel"],panels["AdminBody"]=makeQuickPanel("SXE HUB PRIVAT\nAdmin Command Panel",UDim2.new(0,225,0,240),UDim2.new(0.5,85,1,-340))
+panels["Command Cooldowns"],panels["CooldownBody"]=makeQuickPanel("SXE HUB PRIVAT\nCommand Cooldowns",UDim2.new(0,210,0,315),UDim2.new(0.5,245,1,-390))
+panels["Actions"],panels["ActionsBody"]=makeQuickPanel("SXE HUB PRIVAT\nActions",UDim2.new(0,230,0,340),UDim2.new(0.5,505,1,-415))
+panels["Steal Panel"],panels["StealBody"]=makeQuickPanel("SXE HUB PRIVAT\nSteal Panel",UDim2.new(0,235,0,300),UDim2.new(1,-300,1,-385))
+panels["Steal Target"],panels["TargetBody"]=makeQuickPanel("SXE HUB PRIVAT\nSteal Target",UDim2.new(0,320,0,380),UDim2.new(1,-330,0,85))
+actionSettingsPanel,actionSettingsBody=makeQuickPanel("SXE HUB PRIVAT\nAction Settings",UDim2.new(0,230,0,370),UDim2.new(0.5,745,1,-440))
 actionSettingsPanel.Visible=false
-tpSpeedSettingsPanel,tpSpeedSettingsBody=makeQuickPanel("NANA HUB\nTP & Clone Settings",UDim2.new(0,235,0,325),UDim2.new(0.5,745,1,-440))
+tpSpeedSettingsPanel,tpSpeedSettingsBody=makeQuickPanel("SXE HUB PRIVAT\nTP & Clone Settings",UDim2.new(0,235,0,325),UDim2.new(0.5,745,1,-440))
 tpSpeedSettingsPanel.Visible=false
-for _,pair in ipairs({{"NANA HUB",main},{"NANA HUB\nInvisible Steal",panels["Invisible Steal Panel"]},
-    {"NANA HUB\nAdmin Command Panel",panels["Admin Command Panel"]},{"NANA HUB\nCommand Cooldowns",panels["Command Cooldowns"]},
-    {"NANA HUB\nActions",panels["Actions"]},{"NANA HUB\nSteal Panel",panels["Steal Panel"]},{"NANA HUB\nSteal Target",panels["Steal Target"]},
-    {"NANA HUB\nAction Settings",actionSettingsPanel},{"NANA HUB\nTP & Clone Settings",tpSpeedSettingsPanel}}) do applySavedPosition(pair[1],pair[2]) end
+for _,pair in ipairs({{"SXE HUB PRIVAT",main},{"SXE HUB PRIVAT\nInvisible Steal",panels["Invisible Steal Panel"]},
+    {"SXE HUB PRIVAT\nAdmin Command Panel",panels["Admin Command Panel"]},{"SXE HUB PRIVAT\nCommand Cooldowns",panels["Command Cooldowns"]},
+    {"SXE HUB PRIVAT\nActions",panels["Actions"]},{"SXE HUB PRIVAT\nSteal Panel",panels["Steal Panel"]},{"SXE HUB PRIVAT\nSteal Target",panels["Steal Target"]},
+    {"SXE HUB PRIVAT\nAction Settings",actionSettingsPanel},{"SXE HUB PRIVAT\nTP & Clone Settings",tpSpeedSettingsPanel}}) do applySavedPosition(pair[1],pair[2]) end
 
 -- LAZY UI LOADING
 if _G.addLazyUI then
@@ -9443,7 +9493,7 @@ end
 for tabName,btn in pairs(tabButtons) do btn.MouseButton1Click:Connect(function() loadTab(tabName) end) end
 
 -- BOTTOM BAR
-bottomBar=Instance.new("Frame"); bottomBar.Size=UDim2.new(0,575,0,50); bottomBar.Position=UDim2.new(0.5,-287,0,10); bottomBar.BackgroundColor3=Theme.Background; bottomBar.BackgroundTransparency=0.02; bottomBar.BorderSizePixel=0; bottomBar.Parent=gui; corner(bottomBar,12); addOutline(bottomBar)
+bottomBar=Instance.new("Frame"); bottomBar.Size=UDim2.new(0,575,0,50); bottomBar.Position=UDim2.new(0.5,-287,1,-125); bottomBar.BackgroundColor3=Theme.Background; bottomBar.BackgroundTransparency=0.02; bottomBar.BorderSizePixel=0; bottomBar.Parent=gui; corner(bottomBar,12); addOutline(bottomBar)
 local iw=Instance.new("Frame"); iw.Size=UDim2.new(0,34,0,34); iw.Position=UDim2.new(0,12,0.5,-17); iw.BackgroundColor3=Theme.SoftAccent; iw.BorderSizePixel=0; iw.Parent=bottomBar; corner(iw,8)
 local ic=Instance.new("ImageLabel"); ic.Size=UDim2.new(1,0,1,0); ic.BackgroundTransparency=1; ic.ScaleType=Enum.ScaleType.Fit; ic.Parent=iw; corner(ic,8)
 
@@ -9457,7 +9507,9 @@ _G.updateLogoImage = function(isDark)
     iw.BackgroundColor3 = Theme.SoftAccent
 end
 _G.updateLogoImage(Config and Config.DarkMode or false)
-local lg=Instance.new("TextLabel"); lg.Size=UDim2.new(0,150,0,26); lg.Position=UDim2.new(0,54,0,5); lg.BackgroundTransparency=1; lg.Text="NANA HUB"; lg.TextColor3=Theme.AccentLight; lg.Font=Enum.Font.GothamBlack; lg.TextSize=19; lg.TextXAlignment=Enum.TextXAlignment.Left; lg.Parent=bottomBar
+local lg=Instance.new("TextLabel"); lg.Size=UDim2.new(0,150,0,26); lg.Position=UDim2.new(0,54,0,5); lg.BackgroundTransparency=1; lg.Text="SXE HUB PRIVAT"; lg.TextColor3=Theme.AccentLight; lg.Font=Enum.Font.GothamBlack; lg.TextSize=19; lg.TextXAlignment=Enum.TextXAlignment.Left; lg.Parent=bottomBar
+local dd=Instance.new("TextLabel"); dd.Size=UDim2.new(0,20,0,26); dd.Position=UDim2.new(0,210,0,5); dd.BackgroundTransparency=1; dd.Text="|"; dd.TextColor3=Theme.AccentLight; dd.Font=Enum.Font.GothamBlack; dd.TextSize=18; dd.Parent=bottomBar
+local dc=Instance.new("TextLabel"); dc.Size=UDim2.new(0,210,0,26); dc.Position=UDim2.new(0,230,0,5); dc.BackgroundTransparency=1; dc.Text="discord.gg/sxehub"; dc.TextColor3=Theme.AccentLight; dc.Font=Enum.Font.GothamBold; dc.TextSize=16; dc.TextXAlignment=Enum.TextXAlignment.Left; dc.Parent=bottomBar
 local sb=Instance.new("TextLabel"); sb.Size=UDim2.new(0,290,0,14); sb.Position=UDim2.new(0,55,0,30); sb.BackgroundTransparency=1; sb.Text="By:@SE67 and @SXLVATORE"; sb.TextColor3=Theme.Dim; sb.Font=Enum.Font.GothamSemibold; sb.TextSize=8; sb.TextXAlignment=Enum.TextXAlignment.Left; sb.Parent=bottomBar
 local rightDiv=Instance.new("Frame"); rightDiv.Size=UDim2.new(0,1,0,36); rightDiv.Position=UDim2.new(1,-138,0.5,-18); rightDiv.BackgroundColor3=Theme.Accent; rightDiv.BackgroundTransparency=0.35; rightDiv.BorderSizePixel=0; rightDiv.Parent=bottomBar
 fpsText=Instance.new("TextLabel"); fpsText.Size=UDim2.new(0,126,1,0); fpsText.Position=UDim2.new(1,-128,0,0); fpsText.BackgroundTransparency=1; fpsText.Text="FPS: --\nPING: --ms"; fpsText.TextColor3=Theme.Green; fpsText.Font=Enum.Font.GothamBold; fpsText.TextSize=10; fpsText.TextXAlignment=Enum.TextXAlignment.Left; fpsText.Parent=bottomBar
@@ -9580,7 +9632,7 @@ end)
 _G.InvisStealAngle=Config.InvisStealAngle or 225; _G.SinkSliderValue=Config.SinkSliderValue or 7
 _G.AutoRecoverLagback=true; _G.AutoInvisDuringSteal=Config.AutoInvisDuringSteal or false
 
-print("NANA HUB loaded ")
+print("SXE HUB PRIVAT loaded ")
 
 
 task.spawn(function()
