@@ -593,6 +593,89 @@ function applyTheme(themeName)
 end
 _G.applyTheme = applyTheme
 
+-- RAINBOW UI MODE: cycles every accent color through the hue wheel while
+-- leaving Background/Panel/Row/Text (the dark base) untouched.
+local rainbowThread = nil
+local rainbowTargets = {}
+local rainbowSeen = setmetatable({}, {__mode = "k"})
+local RAINBOW_KEYS = {"Accent", "AccentLight", "Green", "Red", "Red2", "Stroke", "SoftAccent", "SoftAccentHover", "SliderBg"}
+
+local function scanRainbowTargets(root)
+    if not root then return end
+    local function walk(inst)
+        if inst:IsA("GuiObject") or inst:IsA("UIStroke") then
+            for _, prop in ipairs({"BackgroundColor3", "TextColor3", "Color"}) do
+                local ok, current = pcall(function() return inst[prop] end)
+                if ok and typeof(current) == "Color3" and not (rainbowSeen[inst] and rainbowSeen[inst][prop]) then
+                    for _, key in ipairs(RAINBOW_KEYS) do
+                        local base = Themes.Dark[key]
+                        if (current.R - base.R)^2 + (current.G - base.G)^2 + (current.B - base.B)^2 < 0.0001 then
+                            local _, s, v = base:ToHSV()
+                            table.insert(rainbowTargets, {inst = inst, prop = prop, key = key, s = s, v = v})
+                            rainbowSeen[inst] = rainbowSeen[inst] or {}
+                            rainbowSeen[inst][prop] = true
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        for _, child in ipairs(inst:GetChildren()) do
+            walk(child)
+        end
+    end
+    pcall(walk, root)
+end
+
+local function scanAllRainbowRoots()
+    pcall(function() scanRainbowTargets(playerGui:FindFirstChild("SXEHub_V3")) end)
+    for _, name in ipairs({"SXE_RemoteSell", "SXE_StealProgressBar", "XiAdminPanel"}) do
+        pcall(function() scanRainbowTargets(playerGui:FindFirstChild(name)) end)
+    end
+    pcall(function()
+        local ExploitGui = (gethui and gethui()) or game:GetService("CoreGui")
+        scanRainbowTargets(ExploitGui:FindFirstChild("XiPriorityAlertTest"))
+    end)
+end
+
+function setRainbowMode(enabled)
+    Config.RainbowMode = enabled
+    saveConfig()
+    setToggle("Rainbow UI", enabled)
+
+    if not enabled then
+        if rainbowThread then
+            task.cancel(rainbowThread)
+            rainbowThread = nil
+        end
+        for _, entry in ipairs(rainbowTargets) do
+            pcall(function() entry.inst[entry.prop] = Themes.Dark[entry.key] end)
+        end
+        rainbowTargets = {}
+        rainbowSeen = setmetatable({}, {__mode = "k"})
+        return
+    end
+
+    if rainbowThread then return end
+
+    scanAllRainbowRoots()
+    rainbowThread = task.spawn(function()
+        local lastScan = tick()
+        while Config.RainbowMode do
+            local hue = (tick() * 0.15) % 1
+            for _, entry in ipairs(rainbowTargets) do
+                pcall(function() entry.inst[entry.prop] = Color3.fromHSV(hue, entry.s, entry.v) end)
+            end
+            if tick() - lastScan > 2 then
+                scanAllRainbowRoots()
+                lastScan = tick()
+            end
+            task.wait(0.05)
+        end
+    end)
+end
+_G.setRainbowMode = setRainbowMode
+
 local UI = {Locked=false, OpenMenuKey=Enum.KeyCode.LeftControl, CurrentTab="Auto TP"}
 
 Keybinds = {
@@ -758,6 +841,7 @@ loadPSCode()
 Config = {
     positions={},keybinds={},actions={},locked=false,
     DarkMode=false,
+    RainbowMode=false,
     AntiRagdoll=false,InfiniteJump=false,Float=false,
     AutoResetBalloon=false,AutoKickOnSteal=false,KickToPrivateServer=false,CleanErrorGUIs=false,
     LineToBase=false,LineToBrainrot=false,InvisStealAngle=225,SinkSliderValue=7,
@@ -1094,6 +1178,7 @@ local function initToggles()
     setToggle("WalkSpeed", Config.WalkSpeedEnabled, true)
     setToggle("Dark Mode", Config.DarkMode, true)
     setToggle("DarkMode", Config.DarkMode, true)
+    setToggle("Rainbow UI", Config.RainbowMode, true)
     setToggle("Grabble TP", Config.TpSettings.GrabbleTP or false, true)
 end
 
@@ -9525,6 +9610,7 @@ function loadTab(tabName)
     elseif tabName=="Performance" then
         makeSyncMainToggle(mainBody,"FPS Boost (normal)","FPS Boost (normal)",function(on) setFPSBoost(on) end)
         makeSyncMainToggle(mainBody,"FPS Boost Ultra","FPSBoostUltra",function(on) setFPSBoostUltra(on) end)
+        makeSyncMainToggle(mainBody,"Rainbow UI","RainbowMode",function(on) setRainbowMode(on) end)
         makeSyncMainToggle(mainBody,"Xray","XRay",function(on) setXRay(on) end)
         makeQuickSlider(mainBody,"FOV",50,120,Config.FOV or 70,function(v) Config.FOV=v; saveConfig(); pcall(function() Workspace.CurrentCamera.FieldOfView=v end) end)
     end
@@ -9657,6 +9743,7 @@ task.spawn(function() task.wait(0.5)
     if Config.AutoCloseOnExec then if main then main.Visible = false end end
     if Config.FPSBoost then setFPSBoost(true) end
     if Config.FPSBoostUltra then setFPSBoostUltra(true) end
+    if Config.RainbowMode then setRainbowMode(true) end
     if Config.XRay then setXRay(true) end
     pcall(function() Workspace.CurrentCamera.FieldOfView = Config.FOV or 70 end)
     if Config.PlayerESP then playerESPEnabled=true end
