@@ -689,7 +689,8 @@ end
 do
     local PRIMARY_COLOR_KEYS = {"Accent", "AccentLight", "Green", "Red", "Red2", "Stroke", "SoftAccent", "SoftAccentHover", "SliderBg"}
     local SECONDARY_COLOR_KEYS = {"Background", "MainBackground", "Panel", "Row", "RowHover", "SoftButton", "SoftButtonHover", "ToggleOff", "ToggleOff2", "InputBg"}
-    local SECONDARY_SATURATION = 0.35 -- keeps the background a visible dark tint (e.g. dark pink) instead of flat gray
+    local SECONDARY_SATURATION = 0.7 -- keeps the background a visible dark tint (e.g. dark pink) instead of flat gray
+    local SECONDARY_BRIGHTNESS_BOOST = 0.16 -- Dark theme's V values (~0.06-0.19) are too dim for the hue to read at all
     local uiColorCommitThread = nil
 
     local function recolorExistingInstances(before, after)
@@ -736,6 +737,7 @@ do
         end
         for _, key in ipairs(SECONDARY_COLOR_KEYS) do
             local _, _, v = Themes.Dark[key]:ToHSV()
+            v = math.min(0.55, v + SECONDARY_BRIGHTNESS_BOOST)
             Theme[key] = Color3.fromHSV(secondaryHue / 360, SECONDARY_SATURATION, v)
         end
 
