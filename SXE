@@ -1220,6 +1220,22 @@ local function rememberPosition(name, frame) if not name or not frame then retur
 local function applySavedPosition(name, frame)
     if not name or not frame then return end; local d=Config.positions and Config.positions[name]
     if d then frame.Position=UDim2.new(d.xs or 0,d.xo or 0,d.ys or 0,d.yo or 0) end
+    -- Clamp on-screen: hardcoded/saved offsets (e.g. Actions panel's 50%+505px)
+    -- can land fully off-canvas on narrower (mobile) resolutions.
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
+    local vp = cam.ViewportSize
+    local pos, size = frame.Position, frame.Size
+    local w = size.X.Scale * vp.X + size.X.Offset
+    local h = size.Y.Scale * vp.Y + size.Y.Offset
+    local absX = pos.X.Scale * vp.X + pos.X.Offset
+    local absY = pos.Y.Scale * vp.Y + pos.Y.Offset
+    local margin = 20
+    local clampedX = math.min(math.max(absX, margin - w), vp.X - margin)
+    local clampedY = math.min(math.max(absY, margin - h), vp.Y - margin)
+    if clampedX ~= absX or clampedY ~= absY then
+        frame.Position = UDim2.new(pos.X.Scale, math.floor(clampedX - pos.X.Scale * vp.X + 0.5), pos.Y.Scale, math.floor(clampedY - pos.Y.Scale * vp.Y + 0.5))
+    end
 end
 local function initToggles()
     setToggle("Anti Ragdoll", Config.AntiRagdoll, true)
@@ -9921,6 +9937,9 @@ function loadTab(tabName)
             panels["Actions"].Position=UDim2.new(0.5,505,1,-415); panels["Steal Panel"].Position=UDim2.new(1,-300,1,-385)
             panels["Steal Target"].Position=UDim2.new(1,-290,0,85); actionSettingsPanel.Position=UDim2.new(0.5,745,1,-400)
             bottomBar.Position=UDim2.new(0.5,-287,1,-125); Config.positions={}; saveConfig()
+            for _,p in ipairs({main,panels["Invisible Steal Panel"],panels["Admin Command Panel"],panels["Command Cooldowns"],panels["Actions"],panels["Steal Panel"],panels["Steal Target"],actionSettingsPanel,bottomBar}) do
+                applySavedPosition(nil,p)
+            end
         end)
         local lockBtn; lockBtn=makeMainButton(mainBody,UI.Locked and "Locked" or "Unlocked",function() UI.Locked=not UI.Locked; Config.locked=UI.Locked; saveConfig(); lockBtn.Text=UI.Locked and "Locked" or "Unlocked" end,Theme.SoftButton)
         
