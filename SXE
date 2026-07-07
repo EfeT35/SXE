@@ -5278,7 +5278,7 @@ function runAutoSnipe()
     if not hrp or not hum or (hum.Health <= 0) then
         return
     end
-    local lastFpsCap = pcall(getfpscap) and getfpscap() or 60
+    local lastFpsCap = pcall(getfpscap) and getfpscap() or 0
     pcall(setfpscap, 200)
     -- (Old Grabble TP branch removed - now handled by SXE Clone-TP router above.)
     _G._isTpMoving = true
@@ -5639,7 +5639,7 @@ function tpToBrainrot()
     if not targetPart then
         return
     end
-    local lastFpsCap = pcall(getfpscap) and getfpscap() or 60
+    local lastFpsCap = pcall(getfpscap) and getfpscap() or 0
     pcall(setfpscap, 200)
     local ok, err = pcall(function()
         local carpetName = Config.TpSettings.Tool
