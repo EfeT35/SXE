@@ -15,7 +15,36 @@ CoreGui = game:GetService("CoreGui")
 VirtualInputManager = game:GetService("VirtualInputManager")
 
 -- Unlimited FPS: remove Roblox's default 240 FPS cap. 0 = uncapped on most executors.
-pcall(function() if setfpscap then setfpscap(0) end end)
+-- Different executors expose this under different names (or not at all, e.g.
+-- some mobile builds), so try every known path and report what happened.
+function trySetFpsCap(cap)
+    local results = {}
+    local function attempt(name, fn)
+        local ok, err = pcall(fn)
+        table.insert(results, name .. (ok and " ok" or (" failed: " .. tostring(err))))
+        return ok
+    end
+    if typeof(setfpscap) == "function" then
+        attempt("setfpscap", function() setfpscap(cap) end)
+    end
+    if typeof(set_fps_cap) == "function" then
+        attempt("set_fps_cap", function() set_fps_cap(cap) end)
+    end
+    local flagValue = cap <= 0 and "9999" or tostring(cap)
+    if typeof(setfflag) == "function" then
+        attempt("setfflag", function() setfflag("DFIntTaskSchedulerTargetFps", flagValue) end)
+    elseif typeof(setflag) == "function" then
+        attempt("setflag", function() setflag("DFIntTaskSchedulerTargetFps", flagValue) end)
+    end
+    return results
+end
+
+local fpsCapAttempts = trySetFpsCap(0)
+if #fpsCapAttempts == 0 then
+    warn("SXE: this executor exposes no FPS-unlock function (setfpscap/set_fps_cap/setfflag all missing) -- the 60fps cap is enforced by the client/app itself and can't be changed from the script.")
+else
+    print("SXE FPS unlock: " .. table.concat(fpsCapAttempts, " | "))
+end
 
 -- Insta-reset state captured by the FireServer hook below.
 -- GUID is the first arg of the balloon payload. Defaults to a randomly-generated
@@ -5279,7 +5308,7 @@ function runAutoSnipe()
         return
     end
     local lastFpsCap = pcall(getfpscap) and getfpscap() or 0
-    pcall(setfpscap, 200)
+    trySetFpsCap(200)
     -- (Old Grabble TP branch removed - now handled by SXE Clone-TP router above.)
     _G._isTpMoving = true
     local ok, err = pcall(function()
@@ -5611,7 +5640,7 @@ function runAutoSnipe()
         end
     end)
     _G._isTpMoving = false
-    pcall(setfpscap, lastFpsCap)
+    trySetFpsCap(lastFpsCap)
     if not ok then
         warn("runAutoSnipe error:", err)
     end
@@ -5640,7 +5669,7 @@ function tpToBrainrot()
         return
     end
     local lastFpsCap = pcall(getfpscap) and getfpscap() or 0
-    pcall(setfpscap, 200)
+    trySetFpsCap(200)
     local ok, err = pcall(function()
         local carpetName = Config.TpSettings.Tool
         local carpet = LocalPlayer.Backpack:FindFirstChild(carpetName) or char:FindFirstChild(carpetName)
@@ -5703,7 +5732,7 @@ function tpToBrainrot()
             end
         end
     end)
-    pcall(setfpscap, lastFpsCap)
+    trySetFpsCap(lastFpsCap)
     if not ok then
         warn("tpToBrainrot error:", err)
     end
@@ -6575,7 +6604,7 @@ local function setFPSBoostUltra(enabled)
             settings().Physics.AllowSleep = true
             settings().Physics.PhysicsEnvironmentalThrottle = Enum.PhysicsEnvironmentalThrottle or Enum.EnviromentalPhysicsThrottle.Skip
         end)
-        pcall(setfpscap, 0)   -- 0 = unlimited FPS (was 999)
+        trySetFpsCap(0)   -- 0 = unlimited FPS (was 999)
 
         OptimizeLightingUltra()
         ApplyTerrainUltra()
