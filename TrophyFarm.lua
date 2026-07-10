@@ -103,6 +103,54 @@ local State = {
 }
 local touchConnections = {}
 
+-- ============================================================
+-- DEATH HANDLING: pause while dead, resume automatically on respawn
+-- ============================================================
+local function onCharacterAdded(char)
+	State.dead = false
+	local hum = char:WaitForChild("Humanoid")
+	hum.Died:Connect(function()
+		print("[TrophyFarm] character died -- pausing until respawn")
+		State.dead = true
+	end)
+	char:WaitForChild("HumanoidRootPart")
+	print("[TrophyFarm] character (re)spawned -- resuming toward WinBlock" .. State.waypoint)
+	State.lastProgressTime = tick()
+end
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+if LocalPlayer.Character then onCharacterAdded(LocalPlayer.Character) end
+
+-- ============================================================
+-- OBSTACLE AVOIDANCE: raycast forward, steer around walls/hazards instead
+-- of walking straight into them
+-- ============================================================
+local function isPathClear(origin, dir, filterInstance)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {filterInstance}
+	return Workspace:Raycast(origin, dir * 8, params) == nil
+end
+
+-- Returns (moveDirection, wasBlocked). If straight ahead is clear, goes
+-- straight; otherwise tries angling around the obstacle before giving up
+-- and returning the original direction anyway (so a jump can be attempted).
+local function computeMoveDirection(hrp, dir)
+	local char = hrp.Parent
+	if isPathClear(hrp.Position, dir, char) then return dir, false end
+	for _, angleDeg in ipairs({30, -30, 60, -60, 90, -90}) do
+		local rad = math.rad(angleDeg)
+		local rotated = Vector3.new(
+			dir.X * math.cos(rad) - dir.Z * math.sin(rad),
+			0,
+			dir.X * math.sin(rad) + dir.Z * math.cos(rad)
+		)
+		if isPathClear(hrp.Position, rotated, char) then
+			return rotated, true
+		end
+	end
+	return dir, true
+end
+
 local function advanceWaypoint(reason)
 	print(string.format("[TrophyFarm] WinBlock%d cleared (%s)", State.waypoint, reason))
 	State.waypoint = State.waypoint + 1
@@ -164,10 +212,15 @@ local function autoRunStep()
 	end
 
 	local dir = toTarget.Unit
-	hum:Move(Vector3.new(dir.X, 0, dir.Z), false)
-	hrp.AssemblyLinearVelocity = Vector3.new(dir.X * Config.MoveSpeed, hrp.AssemblyLinearVelocity.Y, dir.Z * Config.MoveSpeed)
+	local moveDir, wasBlocked = computeMoveDirection(hrp, dir)
+	hum:Move(Vector3.new(moveDir.X, 0, moveDir.Z), false)
+	hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * Config.MoveSpeed, hrp.AssemblyLinearVelocity.Y, moveDir.Z * Config.MoveSpeed)
 
-	if flatDist > Config.ArriveDistance
+	if wasBlocked and tick() - State.lastJumpTime > 0.4 and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+		-- Blocked straight ahead -- hop, in case it's a low wall/ledge.
+		hum.Jump = true
+		State.lastJumpTime = tick()
+	elseif flatDist > Config.ArriveDistance
 		and tick() - State.lastJumpTime > Config.JumpInterval
 		and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
 		hum.Jump = true
@@ -336,7 +389,7 @@ end)
 task.spawn(function()
 	local lastTrophyFire = 0
 	while true do
-		if not Config.Enabled then
+		if not Config.Enabled or State.dead then
 			task.wait(0.3)
 		else
 			local ok, err = pcall(autoRunStep)
