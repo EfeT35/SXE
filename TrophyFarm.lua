@@ -1,8 +1,8 @@
 -- Auto Farm Trophy (1-Speed-Keyboard-Escape-Candy-Chocolate)
--- Loops through every WinBlock checkpoint (Stage2.WinBlock1 .. Stage12.WinBlock11)
--- to rack up wins, and periodically holds the hub's "x2 Wins" Trophy prompt.
--- Built from TrophyScan/TrophyScan2 output: no WinBlock exists in Stage1/13/14/15,
--- so those are skipped automatically (the scan just didn't find one there).
+-- Loops through every WinBlock checkpoint (Stage2.WinBlock1 .. Stage14.WinBlock13,
+-- rewards scale up to +25K Wins at the later stages) and periodically holds the
+-- hub's "x2 Wins" Trophy prompt. Stage1 and Stage15 have no WinBlock (confirmed
+-- via TrophyScan/TrophyScan2/TrophyScan3), so they're skipped.
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -21,7 +21,8 @@ local Config = {
 
 local structure = Workspace:WaitForChild("Structure")
 
--- Known WinBlock world positions from TrophyScan2 (WinBlock1..11 = Stage2..12).
+-- Known WinBlock world positions from TrophyScan2/TrophyScan3 (WinBlock1..13 =
+-- Stage2..14; Stage15 has no WinBlock, it's the final stage).
 -- Distant stages haven't necessarily streamed in yet (the character never
 -- walked there), so a plain name lookup can fail even though the part
 -- genuinely exists -- these positions let us force that region to load first.
@@ -37,6 +38,8 @@ local KNOWN_WINBLOCK_POSITIONS = {
 	[9] = Vector3.new(-2970.3, 294.5, 1447.9),
 	[10] = Vector3.new(-3938.4, 294.5, 1447.9),
 	[11] = Vector3.new(-4368.3, 469.0, 1512.4),
+	[12] = Vector3.new(-5342.9, 468.6, 1457.1),
+	[13] = Vector3.new(-6809.9, 519.1, 1469.1),
 }
 
 local function getCharacterParts()
@@ -45,12 +48,21 @@ local function getCharacterParts()
 	return char, hrp
 end
 
+if not firetouchinterest then
+	warn("[TrophyFarm] This executor doesn't expose firetouchinterest -- relying on real physics overlap only, which needs a bit longer to register each Touched.")
+end
+
 local function teleportToPart(part)
 	local _, hrp = getCharacterParts()
 	if not hrp or not part or not part.Parent then return false end
 
-	hrp.CFrame = part.CFrame + Vector3.new(0, 3, 0)
-	task.wait(0.05)
+	-- Land ON the part's top surface, not floating a few studs above it --
+	-- Touched only fires from genuine physical overlap, and hovering above a
+	-- thin pad never actually touches it.
+	local halfHeight = (part.Size and part.Size.Y or 2) / 2
+	hrp.CFrame = CFrame.new(part.Position.X, part.Position.Y + halfHeight + 2, part.Position.Z)
+	hrp.AssemblyLinearVelocity = Vector3.zero
+	task.wait(0.15)
 
 	-- Nudge the Touched event directly when the executor supports it, in
 	-- addition to the teleport-based collision (belt and suspenders).
@@ -59,6 +71,10 @@ local function teleportToPart(part)
 		task.wait()
 		pcall(firetouchinterest, hrp, part, 1)
 	end
+
+	-- Give real physics a moment to settle/overlap too, in case the executor
+	-- doesn't support firetouchinterest.
+	task.wait(0.35)
 	return true
 end
 
@@ -199,7 +215,7 @@ input.BorderSizePixel = 0
 input.Font = Enum.Font.GothamBold
 input.TextSize = 14
 input.TextColor3 = Color3.new(1, 1, 1)
-input.PlaceholderText = "1-11"
+input.PlaceholderText = "1-13"
 input.Text = ""
 input.ClearTextOnFocus = false
 input.ZIndex = 2
@@ -283,7 +299,7 @@ task.spawn(function()
 		if not Config.Enabled then
 			task.wait(0.5)
 		else
-			for n = 1, 11 do
+			for n = 1, 13 do
 				if not Config.Enabled then break end
 				teleportToWinBlockNumber(n)
 				task.wait(Config.DelayPerBlock)
