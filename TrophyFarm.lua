@@ -113,7 +113,8 @@ local function fireHubTrophy()
 end
 
 -- ============================================================
--- TOGGLE BUTTON (draggable)
+-- UI: single draggable container holding the toggle + "go to #" row,
+-- so nothing overlaps and both move together. Spawns centered.
 -- ============================================================
 local old = PlayerGui:FindFirstChild("TrophyFarmGui")
 if old then old:Destroy() end
@@ -122,12 +123,21 @@ local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "TrophyFarmGui"
 screenGui.ResetOnSpawn = false
 screenGui.IgnoreGuiInset = true
+screenGui.DisplayOrder = 1000
 screenGui.Parent = PlayerGui
+
+local container = Instance.new("Frame")
+container.Name = "Container"
+container.Size = UDim2.fromOffset(140, 79)
+container.AnchorPoint = Vector2.new(0.5, 0.5)
+container.Position = UDim2.new(0.5, 0, 0.5, 0)
+container.BackgroundTransparency = 1
+container.Parent = screenGui
 
 local btn = Instance.new("TextButton")
 btn.Name = "ToggleButton"
 btn.Size = UDim2.fromOffset(140, 40)
-btn.Position = UDim2.new(0, 20, 0.5, -20)
+btn.Position = UDim2.fromOffset(0, 0)
 btn.BackgroundColor3 = Color3.fromRGB(40, 170, 90)
 btn.BorderSizePixel = 0
 btn.Font = Enum.Font.GothamBold
@@ -135,12 +145,9 @@ btn.TextSize = 14
 btn.TextColor3 = Color3.new(1, 1, 1)
 btn.AutoButtonColor = false
 btn.Active = true
-btn.Draggable = false -- handled manually below so clicks still register
-btn.Parent = screenGui
-
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = btn
+btn.ZIndex = 2
+btn.Parent = container
+Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
 
 local function refreshButton()
 	if Config.Enabled then
@@ -153,43 +160,16 @@ local function refreshButton()
 end
 refreshButton()
 
--- Manual drag (so it can be moved without triggering the toggle click)
-local dragging, dragStart, startPos, dragMoved = false, nil, nil, false
-btn.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragMoved = false
-		dragStart = input.Position
-		startPos = btn.Position
-	end
-end)
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-		local delta = input.Position - dragStart
-		if delta.Magnitude > 6 then dragMoved = true end
-		btn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-	end
-end)
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = false
-	end
-end)
-btn.MouseButton1Click:Connect(function()
-	if dragMoved then return end
-	Config.Enabled = not Config.Enabled
-	refreshButton()
-end)
-
 -- ============================================================
 -- "GO TO #" INPUT: teleport straight to a specific WinBlock number
 -- ============================================================
 local goRow = Instance.new("Frame")
 goRow.Name = "GoToRow"
 goRow.Size = UDim2.fromOffset(140, 34)
-goRow.Position = UDim2.new(0, 20, 0.5, 25)
+goRow.Position = UDim2.fromOffset(0, 45)
 goRow.BackgroundTransparency = 1
-goRow.Parent = screenGui
+goRow.ZIndex = 2
+goRow.Parent = container
 
 local input = Instance.new("TextBox")
 input.Name = "WinBlockInput"
@@ -203,6 +183,7 @@ input.TextColor3 = Color3.new(1, 1, 1)
 input.PlaceholderText = "1-11"
 input.Text = ""
 input.ClearTextOnFocus = false
+input.ZIndex = 2
 input.Parent = goRow
 Instance.new("UICorner", input).CornerRadius = UDim.new(0, 8)
 
@@ -217,6 +198,7 @@ goBtn.TextSize = 14
 goBtn.TextColor3 = Color3.new(1, 1, 1)
 goBtn.AutoButtonColor = false
 goBtn.Text = "GO"
+goBtn.ZIndex = 2
 goBtn.Parent = goRow
 Instance.new("UICorner", goBtn).CornerRadius = UDim.new(0, 8)
 
@@ -239,6 +221,44 @@ end
 goBtn.MouseButton1Click:Connect(goToWinBlock)
 input.FocusLost:Connect(function(enterPressed)
 	if enterPressed then goToWinBlock() end
+end)
+
+-- Drag handle: a thin strip along the top of the toggle button. Dragging it
+-- moves the whole container (both rows together); tapping the rest of the
+-- button still toggles normally.
+local dragHandle = Instance.new("Frame")
+dragHandle.Name = "DragHandle"
+dragHandle.Size = UDim2.new(1, 0, 0, 12)
+dragHandle.Position = UDim2.fromOffset(0, 0)
+dragHandle.BackgroundColor3 = Color3.new(1, 1, 1)
+dragHandle.BackgroundTransparency = 0.85
+dragHandle.ZIndex = 3
+dragHandle.Active = true
+dragHandle.Parent = btn
+Instance.new("UICorner", dragHandle).CornerRadius = UDim.new(0, 8)
+
+local dragging, dragStart, startPos = false, nil, nil
+dragHandle.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = container.Position
+	end
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		container.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+	end
+end)
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = false
+	end
+end)
+btn.MouseButton1Click:Connect(function()
+	Config.Enabled = not Config.Enabled
+	refreshButton()
 end)
 
 task.spawn(function()
