@@ -21,28 +21,28 @@ local Config = {
 
 local structure = Workspace:WaitForChild("Structure")
 
+-- Known WinBlock world positions from TrophyScan2 (WinBlock1..11 = Stage2..12).
+-- Distant stages haven't necessarily streamed in yet (the character never
+-- walked there), so a plain name lookup can fail even though the part
+-- genuinely exists -- these positions let us force that region to load first.
+local KNOWN_WINBLOCK_POSITIONS = {
+	[1] = Vector3.new(-16.5, 6.9, 284.7),
+	[2] = Vector3.new(-16.5, 6.9, 506.7),
+	[3] = Vector3.new(-16.5, 75.1, 774.4),
+	[4] = Vector3.new(-16.5, 75.1, 1108.4),
+	[5] = Vector3.new(-16.5, 75.1, 1411.3),
+	[6] = Vector3.new(-538.4, 52.5, 1447.9),
+	[7] = Vector3.new(-1007.7, 52.5, 1447.9),
+	[8] = Vector3.new(-1123.5, 294.5, 1447.9),
+	[9] = Vector3.new(-2970.3, 294.5, 1447.9),
+	[10] = Vector3.new(-3938.4, 294.5, 1447.9),
+	[11] = Vector3.new(-4368.3, 469.0, 1512.4),
+}
+
 local function getCharacterParts()
 	local char = LocalPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	return char, hrp
-end
-
-local function getWinBlocks()
-	local blocks = {}
-	for _, stage in ipairs(structure:GetChildren()) do
-		if stage.Name:match("^Stage") then
-			for _, inst in ipairs(stage:GetDescendants()) do
-				if inst:IsA("BasePart") and inst.Name:match("^WinBlock%d+$") then
-					local n = tonumber(inst.Name:match("%d+"))
-					if n then table.insert(blocks, {n = n, part = inst}) end
-				end
-			end
-		end
-	end
-	table.sort(blocks, function(a, b) return a.n < b.n end)
-	local ordered = {}
-	for _, b in ipairs(blocks) do table.insert(ordered, b.part) end
-	return ordered
 end
 
 local function teleportToPart(part)
@@ -62,12 +62,6 @@ local function teleportToPart(part)
 	return true
 end
 
-local function touchBlock(part)
-	if not Config.Enabled then return end
-	teleportToPart(part)
-	task.wait(Config.DelayPerBlock)
-end
-
 local function findWinBlockByNumber(n)
 	for _, stage in ipairs(structure:GetChildren()) do
 		if stage.Name:match("^Stage") then
@@ -76,6 +70,31 @@ local function findWinBlockByNumber(n)
 		end
 	end
 	return nil
+end
+
+-- Teleports to WinBlock #n. If it isn't loaded client-side yet (far/unstreamed
+-- stage), moves the HRP to the known position, asks the client to stream that
+-- region in, and retries the real lookup+touch once it's had a moment to load.
+local function teleportToWinBlockNumber(n)
+	local part = findWinBlockByNumber(n)
+	if part then return teleportToPart(part) end
+
+	local knownPos = KNOWN_WINBLOCK_POSITIONS[n]
+	if not knownPos then return false end
+
+	local _, hrp = getCharacterParts()
+	if hrp then hrp.CFrame = CFrame.new(knownPos + Vector3.new(0, 3, 0)) end
+
+	pcall(function()
+		if LocalPlayer.RequestStreamAroundAsync then
+			LocalPlayer:RequestStreamAroundAsync(knownPos)
+		end
+	end)
+	task.wait(0.75)
+
+	part = findWinBlockByNumber(n)
+	if part then return teleportToPart(part) end
+	return false
 end
 
 local function findHubTrophyPrompt()
@@ -210,13 +229,10 @@ local function goToWinBlock()
 		return
 	end
 	n = math.floor(n)
-	local part = findWinBlockByNumber(n)
-	if not part then
-		input.Text = ""
-		input.PlaceholderText = "no WinBlock " .. n
-		return
+	input.Text = ""
+	if not teleportToWinBlockNumber(n) then
+		input.PlaceholderText = "WinBlock " .. n .. " not found"
 	end
-	teleportToPart(part)
 end
 goBtn.MouseButton1Click:Connect(goToWinBlock)
 input.FocusLost:Connect(function(enterPressed)
@@ -267,18 +283,14 @@ task.spawn(function()
 		if not Config.Enabled then
 			task.wait(0.5)
 		else
-			local blocks = getWinBlocks()
-			if #blocks == 0 then
-				task.wait(1)
-			else
-				for _, part in ipairs(blocks) do
-					if not Config.Enabled then break end
-					touchBlock(part)
+			for n = 1, 11 do
+				if not Config.Enabled then break end
+				teleportToWinBlockNumber(n)
+				task.wait(Config.DelayPerBlock)
 
-					if Config.UseTrophyPrompt and (tick() - lastTrophyFire) >= Config.TrophyPromptInterval then
-						pcall(fireHubTrophy)
-						lastTrophyFire = tick()
-					end
+				if Config.UseTrophyPrompt and (tick() - lastTrophyFire) >= Config.TrophyPromptInterval then
+					pcall(fireHubTrophy)
+					lastTrophyFire = tick()
 				end
 			end
 		end
