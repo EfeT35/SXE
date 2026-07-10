@@ -1,8 +1,11 @@
 -- Auto Farm Trophy (1-Speed-Keyboard-Escape-Candy-Chocolate)
--- Loops through every WinBlock checkpoint (Stage2.WinBlock1 .. Stage14.WinBlock13,
--- rewards scale up to +25K Wins at the later stages) and periodically holds the
--- hub's "x2 Wins" Trophy prompt. Stage1 and Stage15 have no WinBlock (confirmed
--- via TrophyScan/TrophyScan2/TrophyScan3), so they're skipped.
+-- Walks the character forward toward each WinBlock checkpoint in order
+-- (Stage2.WinBlock1 .. Stage14.WinBlock13) using real humanoid movement
+-- instead of teleporting -- confirmed in-game that the win-grant logic
+-- validates genuine movement, so a teleport-based touch never counted.
+-- Advancement to the next waypoint is driven by an actual .Touched
+-- connection on the current WinBlock (the same event that grants the win),
+-- with a stuck-timeout fallback so the loop can't get stuck forever.
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -15,7 +18,9 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local Config = {
 	Enabled = true,
-	DelayPerBlock = 0.35,     -- time to let the Touched event register before moving on
+	ArriveDistance = 10,      -- flat (XZ) distance considered "at" the waypoint
+	StuckTimeout = 8,         -- seconds with no touch + no progress before skipping ahead anyway
+	JumpInterval = 1.2,       -- min seconds between anti-stuck jumps
 	UseTrophyPrompt = true,   -- also trigger the hub's x2 Wins prompt periodically
 	TrophyPromptInterval = 5, -- seconds between x2 Wins attempts
 }
@@ -23,10 +28,8 @@ local Config = {
 local structure = Workspace:WaitForChild("Structure")
 
 -- Known WinBlock world positions from TrophyScan2/TrophyScan3 (WinBlock1..13 =
--- Stage2..14; Stage15 has no WinBlock, it's the final stage).
--- Distant stages haven't necessarily streamed in yet (the character never
--- walked there), so a plain name lookup can fail even though the part
--- genuinely exists -- these positions let us force that region to load first.
+-- Stage2..14). Stage15 has a reward too ("+50K Wins") but under a different
+-- name we haven't identified yet, so it's not included here.
 local KNOWN_WINBLOCK_POSITIONS = {
 	[1] = Vector3.new(-16.5, 6.9, 284.7),
 	[2] = Vector3.new(-16.5, 6.9, 506.7),
@@ -42,47 +45,13 @@ local KNOWN_WINBLOCK_POSITIONS = {
 	[12] = Vector3.new(-5342.9, 468.6, 1457.1),
 	[13] = Vector3.new(-6809.9, 519.1, 1469.1),
 }
+local MAX_WAYPOINT = 13
 
 local function getCharacterParts()
 	local char = LocalPlayer.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	return char, hrp
-end
-
-print(string.format("[TrophyFarm] executor caps: firetouchinterest=%s fireproximityprompt=%s",
-	tostring(firetouchinterest ~= nil), tostring(fireproximityprompt ~= nil)))
-
-local function teleportToPart(part)
-	local _, hrp = getCharacterParts()
-	if not hrp or not part or not part.Parent then return false end
-
-	print(string.format("[TrophyFarm] -> %s | CanCollide=%s CanTouch=%s",
-		part:GetFullName(), tostring(part.CanCollide), tostring(part.CanTouch)))
-
-	-- Land ON the part's top surface, not floating a few studs above it --
-	-- Touched only fires from genuine physical overlap, and hovering above a
-	-- thin pad never actually touches it.
-	local halfHeight = (part.Size and part.Size.Y or 2) / 2
-	local landCFrame = CFrame.new(part.Position.X, part.Position.Y + halfHeight + 2, part.Position.Z)
-
-	-- Hold the HRP there for ~15 physics frames (re-asserting each frame) so
-	-- gravity/the character controller carrying it away doesn't cut the
-	-- overlap short before the server has a chance to detect the Touched.
-	for i = 1, 15 do
-		if not hrp.Parent then break end
-		hrp.CFrame = landCFrame
-		hrp.AssemblyLinearVelocity = Vector3.zero
-
-		if firetouchinterest and i == 3 then
-			pcall(firetouchinterest, hrp, part, 0)
-		end
-		if firetouchinterest and i == 5 then
-			pcall(firetouchinterest, hrp, part, 1)
-		end
-
-		RunService.Heartbeat:Wait()
-	end
-	return true
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	return char, hrp, hum
 end
 
 local function findWinBlockByNumber(n)
@@ -93,31 +62,6 @@ local function findWinBlockByNumber(n)
 		end
 	end
 	return nil
-end
-
--- Teleports to WinBlock #n. If it isn't loaded client-side yet (far/unstreamed
--- stage), moves the HRP to the known position, asks the client to stream that
--- region in, and retries the real lookup+touch once it's had a moment to load.
-local function teleportToWinBlockNumber(n)
-	local part = findWinBlockByNumber(n)
-	if part then return teleportToPart(part) end
-
-	local knownPos = KNOWN_WINBLOCK_POSITIONS[n]
-	if not knownPos then return false end
-
-	local _, hrp = getCharacterParts()
-	if hrp then hrp.CFrame = CFrame.new(knownPos + Vector3.new(0, 3, 0)) end
-
-	pcall(function()
-		if LocalPlayer.RequestStreamAroundAsync then
-			LocalPlayer:RequestStreamAroundAsync(knownPos)
-		end
-	end)
-	task.wait(0.75)
-
-	part = findWinBlockByNumber(n)
-	if part then return teleportToPart(part) end
-	return false
 end
 
 local function findHubTrophyPrompt()
@@ -133,16 +77,6 @@ end
 local function fireHubTrophy()
 	local trophy, prompt = findHubTrophyPrompt()
 	if not trophy or not prompt then return end
-
-	local _, hrp = getCharacterParts()
-	if hrp then
-		local ok, pivot = pcall(function() return trophy:GetPivot() end)
-		if ok then
-			hrp.CFrame = pivot + Vector3.new(0, 3, 0)
-			task.wait(0.1)
-		end
-	end
-
 	if fireproximityprompt then
 		pcall(fireproximityprompt, prompt)
 	else
@@ -151,6 +85,88 @@ local function fireHubTrophy()
 			task.wait((prompt.HoldDuration or 0) + 0.05)
 			prompt:InputHoldEnd()
 		end)
+	end
+end
+
+-- ============================================================
+-- AUTO-RUN STATE
+-- ============================================================
+local State = {
+	waypoint = 1,
+	lastProgressTime = tick(),
+	lastJumpTime = 0,
+	lastPos = nil,
+}
+local touchConnections = {}
+
+local function advanceWaypoint(reason)
+	print(string.format("[TrophyFarm] WinBlock%d cleared (%s)", State.waypoint, reason))
+	State.waypoint = State.waypoint + 1
+	if State.waypoint > MAX_WAYPOINT then
+		State.waypoint = 1
+		print("[TrophyFarm] lap complete -- looping back to WinBlock1")
+	end
+	State.lastProgressTime = tick()
+end
+
+local function connectWinBlockTouch(n)
+	if touchConnections[n] then return end
+	local part = findWinBlockByNumber(n)
+	if not part then return end
+	touchConnections[n] = part.Touched:Connect(function(hit)
+		local _, hrp = getCharacterParts()
+		if hrp and (hit == hrp or hit:IsDescendantOf(hrp.Parent)) and State.waypoint == n then
+			advanceWaypoint("Touched")
+		end
+	end)
+end
+
+local function autoRunStep()
+	local _, hrp, hum = getCharacterParts()
+	if not hrp or not hum then return end
+
+	connectWinBlockTouch(State.waypoint)
+
+	local target = KNOWN_WINBLOCK_POSITIONS[State.waypoint]
+	if not target then
+		State.waypoint = 1
+		target = KNOWN_WINBLOCK_POSITIONS[1]
+	end
+
+	local toTarget = target - hrp.Position
+	local flatDist = Vector3.new(toTarget.X, 0, toTarget.Z).Magnitude
+
+	-- Track real progress (moved meaningfully since last frame) for the
+	-- stuck-jump/stuck-skip logic, independent of the Touched-based advance.
+	if State.lastPos then
+		if (hrp.Position - State.lastPos).Magnitude > 2 then
+			State.lastProgressTime = tick()
+		end
+	end
+	State.lastPos = hrp.Position
+
+	if flatDist < Config.ArriveDistance and tick() - State.lastProgressTime > Config.StuckTimeout then
+		-- Arrived close enough but Touched never fired (streaming lag, missed
+		-- connection, etc.) -- don't get stuck forever, move on anyway.
+		advanceWaypoint("stuck-timeout at close range")
+		return
+	end
+
+	if tick() - State.lastProgressTime > Config.StuckTimeout then
+		-- Not making progress at all and not close either -- still move on
+		-- rather than idling forever against a wall.
+		advanceWaypoint("stuck-timeout, no progress")
+		return
+	end
+
+	local dir = toTarget.Unit
+	hum:Move(Vector3.new(dir.X, 0, dir.Z), false)
+
+	if flatDist > Config.ArriveDistance
+		and tick() - State.lastJumpTime > Config.JumpInterval
+		and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+		hum.Jump = true
+		State.lastJumpTime = tick()
 	end
 end
 
@@ -193,17 +209,19 @@ Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
 
 local function refreshButton()
 	if Config.Enabled then
-		btn.Text = "TP: ON (tap to stop)"
+		btn.Text = "RUN: ON (tap to stop)"
 		btn.BackgroundColor3 = Color3.fromRGB(40, 170, 90)
 	else
-		btn.Text = "TP: OFF (tap to start)"
+		btn.Text = "RUN: OFF (tap to start)"
 		btn.BackgroundColor3 = Color3.fromRGB(170, 45, 45)
 	end
 end
 refreshButton()
 
 -- ============================================================
--- "GO TO #" INPUT: teleport straight to a specific WinBlock number
+-- "GO TO #" INPUT: jump the auto-run's target straight to a WinBlock number
+-- (still walks/runs there for real -- this only skips which waypoint it's
+-- currently chasing, it never teleports).
 -- ============================================================
 local goRow = Instance.new("Frame")
 goRow.Name = "GoToRow"
@@ -246,16 +264,19 @@ Instance.new("UICorner", goBtn).CornerRadius = UDim.new(0, 8)
 
 local function goToWinBlock()
 	local n = tonumber(input.Text)
+	input.Text = ""
 	if not n then
 		input.PlaceholderText = "enter a number"
-		input.Text = ""
 		return
 	end
 	n = math.floor(n)
-	input.Text = ""
-	if not teleportToWinBlockNumber(n) then
-		input.PlaceholderText = "WinBlock " .. n .. " not found"
+	if n < 1 or n > MAX_WAYPOINT then
+		input.PlaceholderText = "1-" .. MAX_WAYPOINT .. " only"
+		return
 	end
+	State.waypoint = n
+	State.lastProgressTime = tick()
+	print("[TrophyFarm] now heading for WinBlock" .. n)
 end
 goBtn.MouseButton1Click:Connect(goToWinBlock)
 input.FocusLost:Connect(function(enterPressed)
@@ -304,18 +325,16 @@ task.spawn(function()
 	local lastTrophyFire = 0
 	while true do
 		if not Config.Enabled then
-			task.wait(0.5)
+			task.wait(0.3)
 		else
-			for n = 1, 13 do
-				if not Config.Enabled then break end
-				teleportToWinBlockNumber(n)
-				task.wait(Config.DelayPerBlock)
+			autoRunStep()
 
-				if Config.UseTrophyPrompt and (tick() - lastTrophyFire) >= Config.TrophyPromptInterval then
-					pcall(fireHubTrophy)
-					lastTrophyFire = tick()
-				end
+			if Config.UseTrophyPrompt and (tick() - lastTrophyFire) >= Config.TrophyPromptInterval then
+				pcall(fireHubTrophy)
+				lastTrophyFire = tick()
 			end
+
+			RunService.Heartbeat:Wait()
 		end
 	end
 end)
@@ -324,6 +343,7 @@ getgenv().TrophyFarm = {
 	Stop = function() Config.Enabled = false; refreshButton() end,
 	Start = function() Config.Enabled = true; refreshButton() end,
 	Config = Config,
+	State = State,
 }
 
-print("[TrophyFarm] started -- looping WinBlock1..WinBlock13. Tap the on-screen button (or call getgenv().TrophyFarm.Stop()) to pause.")
+print("[TrophyFarm] started -- auto-running toward WinBlock1..WinBlock13 (real movement, no teleport). Tap the on-screen button (or call getgenv().TrophyFarm.Stop()) to pause.")
