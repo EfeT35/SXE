@@ -45,10 +45,9 @@ local function getWinBlocks()
 	return ordered
 end
 
-local function touchBlock(part)
-	if not Config.Enabled then return end
+local function teleportToPart(part)
 	local _, hrp = getCharacterParts()
-	if not hrp or not part or not part.Parent then return end
+	if not hrp or not part or not part.Parent then return false end
 
 	hrp.CFrame = part.CFrame + Vector3.new(0, 3, 0)
 	task.wait(0.05)
@@ -60,8 +59,23 @@ local function touchBlock(part)
 		task.wait()
 		pcall(firetouchinterest, hrp, part, 1)
 	end
+	return true
+end
 
+local function touchBlock(part)
+	if not Config.Enabled then return end
+	teleportToPart(part)
 	task.wait(Config.DelayPerBlock)
+end
+
+local function findWinBlockByNumber(n)
+	for _, stage in ipairs(structure:GetChildren()) do
+		if stage.Name:match("^Stage") then
+			local part = stage:FindFirstChild("WinBlock" .. n, true)
+			if part and part:IsA("BasePart") then return part end
+		end
+	end
+	return nil
 end
 
 local function findHubTrophyPrompt()
@@ -165,6 +179,66 @@ btn.MouseButton1Click:Connect(function()
 	if dragMoved then return end
 	Config.Enabled = not Config.Enabled
 	refreshButton()
+end)
+
+-- ============================================================
+-- "GO TO #" INPUT: teleport straight to a specific WinBlock number
+-- ============================================================
+local goRow = Instance.new("Frame")
+goRow.Name = "GoToRow"
+goRow.Size = UDim2.fromOffset(140, 34)
+goRow.Position = UDim2.new(0, 20, 0.5, 25)
+goRow.BackgroundTransparency = 1
+goRow.Parent = screenGui
+
+local input = Instance.new("TextBox")
+input.Name = "WinBlockInput"
+input.Size = UDim2.fromOffset(80, 34)
+input.Position = UDim2.fromOffset(0, 0)
+input.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+input.BorderSizePixel = 0
+input.Font = Enum.Font.GothamBold
+input.TextSize = 14
+input.TextColor3 = Color3.new(1, 1, 1)
+input.PlaceholderText = "1-11"
+input.Text = ""
+input.ClearTextOnFocus = false
+input.Parent = goRow
+Instance.new("UICorner", input).CornerRadius = UDim.new(0, 8)
+
+local goBtn = Instance.new("TextButton")
+goBtn.Name = "GoButton"
+goBtn.Size = UDim2.fromOffset(56, 34)
+goBtn.Position = UDim2.fromOffset(84, 0)
+goBtn.BackgroundColor3 = Color3.fromRGB(60, 110, 220)
+goBtn.BorderSizePixel = 0
+goBtn.Font = Enum.Font.GothamBold
+goBtn.TextSize = 14
+goBtn.TextColor3 = Color3.new(1, 1, 1)
+goBtn.AutoButtonColor = false
+goBtn.Text = "GO"
+goBtn.Parent = goRow
+Instance.new("UICorner", goBtn).CornerRadius = UDim.new(0, 8)
+
+local function goToWinBlock()
+	local n = tonumber(input.Text)
+	if not n then
+		input.PlaceholderText = "enter a number"
+		input.Text = ""
+		return
+	end
+	n = math.floor(n)
+	local part = findWinBlockByNumber(n)
+	if not part then
+		input.Text = ""
+		input.PlaceholderText = "no WinBlock " .. n
+		return
+	end
+	teleportToPart(part)
+end
+goBtn.MouseButton1Click:Connect(goToWinBlock)
+input.FocusLost:Connect(function(enterPressed)
+	if enterPressed then goToWinBlock() end
 end)
 
 task.spawn(function()
