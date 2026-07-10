@@ -8,6 +8,7 @@ repeat task.wait() until game:IsLoaded()
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -48,33 +49,39 @@ local function getCharacterParts()
 	return char, hrp
 end
 
-if not firetouchinterest then
-	warn("[TrophyFarm] This executor doesn't expose firetouchinterest -- relying on real physics overlap only, which needs a bit longer to register each Touched.")
-end
+print(string.format("[TrophyFarm] executor caps: firetouchinterest=%s fireproximityprompt=%s",
+	tostring(firetouchinterest ~= nil), tostring(fireproximityprompt ~= nil)))
 
 local function teleportToPart(part)
 	local _, hrp = getCharacterParts()
 	if not hrp or not part or not part.Parent then return false end
 
+	print(string.format("[TrophyFarm] -> %s | CanCollide=%s CanTouch=%s",
+		part:GetFullName(), tostring(part.CanCollide), tostring(part.CanTouch)))
+
 	-- Land ON the part's top surface, not floating a few studs above it --
 	-- Touched only fires from genuine physical overlap, and hovering above a
 	-- thin pad never actually touches it.
 	local halfHeight = (part.Size and part.Size.Y or 2) / 2
-	hrp.CFrame = CFrame.new(part.Position.X, part.Position.Y + halfHeight + 2, part.Position.Z)
-	hrp.AssemblyLinearVelocity = Vector3.zero
-	task.wait(0.15)
+	local landCFrame = CFrame.new(part.Position.X, part.Position.Y + halfHeight + 2, part.Position.Z)
 
-	-- Nudge the Touched event directly when the executor supports it, in
-	-- addition to the teleport-based collision (belt and suspenders).
-	if firetouchinterest then
-		pcall(firetouchinterest, hrp, part, 0)
-		task.wait()
-		pcall(firetouchinterest, hrp, part, 1)
+	-- Hold the HRP there for ~15 physics frames (re-asserting each frame) so
+	-- gravity/the character controller carrying it away doesn't cut the
+	-- overlap short before the server has a chance to detect the Touched.
+	for i = 1, 15 do
+		if not hrp.Parent then break end
+		hrp.CFrame = landCFrame
+		hrp.AssemblyLinearVelocity = Vector3.zero
+
+		if firetouchinterest and i == 3 then
+			pcall(firetouchinterest, hrp, part, 0)
+		end
+		if firetouchinterest and i == 5 then
+			pcall(firetouchinterest, hrp, part, 1)
+		end
+
+		RunService.Heartbeat:Wait()
 	end
-
-	-- Give real physics a moment to settle/overlap too, in case the executor
-	-- doesn't support firetouchinterest.
-	task.wait(0.35)
 	return true
 end
 
@@ -319,4 +326,4 @@ getgenv().TrophyFarm = {
 	Config = Config,
 }
 
-print("[TrophyFarm] started -- looping WinBlock1..WinBlock11. Tap the on-screen button (or call getgenv().TrophyFarm.Stop()) to pause.")
+print("[TrophyFarm] started -- looping WinBlock1..WinBlock13. Tap the on-screen button (or call getgenv().TrophyFarm.Stop()) to pause.")
