@@ -1,11 +1,16 @@
 -- Auto Farm Trophy (1-Speed-Keyboard-Escape-Candy-Chocolate)
--- Walks the character forward toward each WinBlock checkpoint in order
--- (Stage2.WinBlock1 .. Stage14.WinBlock13) using real humanoid movement
--- instead of teleporting -- confirmed in-game that the win-grant logic
--- validates genuine movement, so a teleport-based touch never counted.
--- Advancement to the next waypoint is driven by an actual .Touched
--- connection on the current WinBlock (the same event that grants the win),
--- with a stuck-timeout fallback so the loop can't get stuck forever.
+-- Discovered on the shop wall: equipped "shoes" grant Wins per STEP taken
+-- (+1/pas, +2/pas, up to +100/pas requiring more total wins to unlock).
+-- That's a far safer, more reliable farm than navigating the obstacle
+-- course (which has turns/hazards a straight-line bot kept running into
+-- and dying on). This walks the character gently back and forth in place,
+-- right where you start it, to rack up steps with zero navigation risk.
+--
+-- The WinBlock checkpoints (Stage2.WinBlock1 .. Stage14.WinBlock13) still
+-- exist for one-off manual claims via the GO input below -- confirmed
+-- in-game that touching them for real (not teleporting) grants a win, so
+-- GO walks there for real using the same movement + obstacle-avoidance
+-- logic, once, instead of teleporting.
 repeat task.wait() until game:IsLoaded()
 
 local Players = game:GetService("Players")
@@ -17,22 +22,16 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local Config = {
-	Enabled = true,
-	ArriveDistance = 10,      -- flat (XZ) distance considered "at" the waypoint
-	StuckTimeout = 8,         -- seconds with no touch + no progress before skipping ahead anyway
-	JumpInterval = 1.2,       -- min seconds between anti-stuck jumps
-	MoveSpeed = 250,          -- studs/sec driven directly via velocity (Humanoid:Move can get
-	                          -- overridden by the game's own control scripts if you aren't
-	                          -- actually touching the controls, so this is the primary driver)
-	UseTrophyPrompt = true,   -- also trigger the hub's x2 Wins prompt periodically
-	TrophyPromptInterval = 5, -- seconds between x2 Wins attempts
+	Enabled = false,      -- starts off; tap ON once you're standing somewhere safe
+	StepRadius = 5,       -- studs to walk back and forth from the start point
+	StepTimeout = 3,      -- max seconds to wait per leg before switching anyway
+	MoveSpeed = 250,      -- studs/sec for the manual GO-to-WinBlock walk
 }
 
 local structure = Workspace:WaitForChild("Structure")
 
--- Known WinBlock world positions from TrophyScan2/TrophyScan3 (WinBlock1..13 =
--- Stage2..14). Stage15 has a reward too ("+50K Wins") but under a different
--- name we haven't identified yet, so it's not included here.
+-- Known WinBlock world positions (WinBlock1..13 = Stage2..14), for the
+-- manual GO input only -- not used by the step-in-place farm.
 local KNOWN_WINBLOCK_POSITIONS = {
 	[1] = Vector3.new(-16.5, 6.9, 284.7),
 	[2] = Vector3.new(-16.5, 6.9, 506.7),
@@ -67,62 +66,75 @@ local function findWinBlockByNumber(n)
 	return nil
 end
 
-local function findHubTrophyPrompt()
-	local hub = structure:FindFirstChild("Stage0_HUB")
-	local trophy = hub and hub:FindFirstChild("Trophy")
-	if not trophy then return nil, nil end
-	for _, d in ipairs(trophy:GetDescendants()) do
-		if d:IsA("ProximityPrompt") then return trophy, d end
-	end
-	return trophy, nil
-end
-
-local function fireHubTrophy()
-	local trophy, prompt = findHubTrophyPrompt()
-	if not trophy or not prompt then return end
-	if fireproximityprompt then
-		pcall(fireproximityprompt, prompt)
-	else
-		pcall(function()
-			prompt:InputHoldBegin()
-			task.wait((prompt.HoldDuration or 0) + 0.05)
-			prompt:InputHoldEnd()
-		end)
-	end
-end
-
--- ============================================================
--- AUTO-RUN STATE
--- ============================================================
 local State = {
-	waypoint = 1,
-	lastProgressTime = tick(),
-	lastJumpTime = 0,
-	lastPos = nil,
-	lastStatusPrint = 0,
+	dead = false,
+	homeCFrame = nil,  -- captured the moment stepping is enabled
+	stepDir = 1,       -- 1 = forward, -1 = backward from homeCFrame
 }
-local touchConnections = {}
 
 -- ============================================================
 -- DEATH HANDLING: pause while dead, resume automatically on respawn
 -- ============================================================
 local function onCharacterAdded(char)
 	State.dead = false
+	State.homeCFrame = nil -- re-anchor wherever the respawned character ends up
 	local hum = char:WaitForChild("Humanoid")
 	hum.Died:Connect(function()
 		print("[TrophyFarm] character died -- pausing until respawn")
 		State.dead = true
 	end)
 	char:WaitForChild("HumanoidRootPart")
-	print("[TrophyFarm] character (re)spawned -- resuming toward WinBlock" .. State.waypoint)
-	State.lastProgressTime = tick()
+	print("[TrophyFarm] character (re)spawned")
 end
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 if LocalPlayer.Character then onCharacterAdded(LocalPlayer.Character) end
 
 -- ============================================================
--- OBSTACLE AVOIDANCE: raycast forward, steer around walls/hazards instead
--- of walking straight into them
+-- STEP-IN-PLACE FARM: walks back and forth a few studs from wherever
+-- stepping was enabled, checking for ground before each leg so it can't
+-- walk itself off a ledge.
+-- ============================================================
+local function hasGroundBelow(pos, char)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {char}
+	return Workspace:Raycast(pos + Vector3.new(0, 3, 0), Vector3.new(0, -10, 0), params) ~= nil
+end
+
+local function stepFarmTick()
+	local char, hrp, hum = getCharacterParts()
+	if not char or not hrp or not hum then return end
+
+	if not State.homeCFrame then
+		State.homeCFrame = hrp.CFrame
+		print("[TrophyFarm] step-farm anchored here: " .. tostring(hrp.Position))
+	end
+
+	local forward = State.homeCFrame.LookVector
+	local targetPos = State.homeCFrame.Position + forward * (Config.StepRadius * State.stepDir)
+
+	if not hasGroundBelow(targetPos, char) then
+		-- No floor that way (edge/gap) -- flip direction and try the other leg.
+		State.stepDir = -State.stepDir
+		return
+	end
+
+	hum:MoveTo(targetPos)
+	local done = false
+	local conn
+	conn = hum.MoveToFinished:Connect(function() done = true end)
+	local start = tick()
+	while not done and tick() - start < Config.StepTimeout and Config.Enabled and not State.dead do
+		task.wait(0.1)
+	end
+	conn:Disconnect()
+
+	State.stepDir = -State.stepDir
+end
+
+-- ============================================================
+-- MANUAL "GO TO #": walks (doesn't teleport) to a specific WinBlock, once,
+-- with the same obstacle-avoidance used for the old auto-run.
 -- ============================================================
 local function isPathClear(origin, dir, filterInstance)
 	local params = RaycastParams.new()
@@ -131,11 +143,7 @@ local function isPathClear(origin, dir, filterInstance)
 	return Workspace:Raycast(origin, dir * 8, params) == nil
 end
 
--- Returns (moveDirection, wasBlocked). If straight ahead is clear, goes
--- straight; otherwise tries angling around the obstacle before giving up
--- and returning the original direction anyway (so a jump can be attempted).
-local function computeMoveDirection(hrp, dir)
-	local char = hrp.Parent
+local function computeMoveDirection(hrp, dir, char)
 	if isPathClear(hrp.Position, dir, char) then return dir, false end
 	for _, angleDeg in ipairs({30, -30, 60, -60, 90, -90}) do
 		local rad = math.rad(angleDeg)
@@ -151,88 +159,39 @@ local function computeMoveDirection(hrp, dir)
 	return dir, true
 end
 
-local function advanceWaypoint(reason)
-	print(string.format("[TrophyFarm] WinBlock%d cleared (%s)", State.waypoint, reason))
-	State.waypoint = State.waypoint + 1
-	if State.waypoint > MAX_WAYPOINT then
-		State.waypoint = 1
-		print("[TrophyFarm] lap complete -- looping back to WinBlock1")
-	end
-	State.lastProgressTime = tick()
-end
+local function walkToWinBlock(n)
+	local target = KNOWN_WINBLOCK_POSITIONS[n]
+	if not target then return end
 
-local function connectWinBlockTouch(n)
-	if touchConnections[n] then return end
-	local part = findWinBlockByNumber(n)
-	if not part then return end
-	touchConnections[n] = part.Touched:Connect(function(hit)
-		local _, hrp = getCharacterParts()
-		if hrp and (hit == hrp or hit:IsDescendantOf(hrp.Parent)) and State.waypoint == n then
-			advanceWaypoint("Touched")
-		end
-	end)
-end
+	print("[TrophyFarm] walking to WinBlock" .. n .. " ...")
+	local start = tick()
+	local lastJump = 0
+	while tick() - start < 60 do
+		local char, hrp, hum = getCharacterParts()
+		if not char or not hrp or not hum or State.dead then
+			task.wait(0.2)
+		else
+			local toTarget = target - hrp.Position
+			local flatDist = Vector3.new(toTarget.X, 0, toTarget.Z).Magnitude
+			if flatDist < 8 then
+				print("[TrophyFarm] arrived at WinBlock" .. n)
+				return
+			end
 
-local function autoRunStep()
-	local _, hrp, hum = getCharacterParts()
-	if not hrp or not hum then return end
+			local dir = toTarget.Unit
+			local moveDir, wasBlocked = computeMoveDirection(hrp, Vector3.new(dir.X, 0, dir.Z).Unit, char)
+			hum:Move(moveDir, false)
+			hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * Config.MoveSpeed, hrp.AssemblyLinearVelocity.Y, moveDir.Z * Config.MoveSpeed)
 
-	connectWinBlockTouch(State.waypoint)
+			if wasBlocked and tick() - lastJump > 0.5 and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
+				hum.Jump = true
+				lastJump = tick()
+			end
 
-	local target = KNOWN_WINBLOCK_POSITIONS[State.waypoint]
-	if not target then
-		State.waypoint = 1
-		target = KNOWN_WINBLOCK_POSITIONS[1]
-	end
-
-	local toTarget = target - hrp.Position
-	local flatDist = Vector3.new(toTarget.X, 0, toTarget.Z).Magnitude
-
-	-- Track real progress (moved meaningfully since last frame) for the
-	-- stuck-jump/stuck-skip logic, independent of the Touched-based advance.
-	if State.lastPos then
-		if (hrp.Position - State.lastPos).Magnitude > 2 then
-			State.lastProgressTime = tick()
+			RunService.Heartbeat:Wait()
 		end
 	end
-	State.lastPos = hrp.Position
-
-	if flatDist < Config.ArriveDistance and tick() - State.lastProgressTime > Config.StuckTimeout then
-		-- Arrived close enough but Touched never fired (streaming lag, missed
-		-- connection, etc.) -- don't get stuck forever, move on anyway.
-		advanceWaypoint("stuck-timeout at close range")
-		return
-	end
-
-	if tick() - State.lastProgressTime > Config.StuckTimeout then
-		-- Not making progress at all and not close either -- still move on
-		-- rather than idling forever against a wall.
-		advanceWaypoint("stuck-timeout, no progress")
-		return
-	end
-
-	local dir = toTarget.Unit
-	local moveDir, wasBlocked = computeMoveDirection(hrp, dir)
-	hum:Move(Vector3.new(moveDir.X, 0, moveDir.Z), false)
-	hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * Config.MoveSpeed, hrp.AssemblyLinearVelocity.Y, moveDir.Z * Config.MoveSpeed)
-
-	if wasBlocked and tick() - State.lastJumpTime > 0.4 and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
-		-- Blocked straight ahead -- hop, in case it's a low wall/ledge.
-		hum.Jump = true
-		State.lastJumpTime = tick()
-	elseif flatDist > Config.ArriveDistance
-		and tick() - State.lastJumpTime > Config.JumpInterval
-		and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
-		hum.Jump = true
-		State.lastJumpTime = tick()
-	end
-
-	if tick() - State.lastStatusPrint > 2 then
-		State.lastStatusPrint = tick()
-		print(string.format("[TrophyFarm] waypoint=%d flatDist=%.1f pos=(%.1f,%.1f,%.1f) WalkSpeed=%s MoveDir=(%.2f,%.2f,%.2f)",
-			State.waypoint, flatDist, hrp.Position.X, hrp.Position.Y, hrp.Position.Z,
-			tostring(hum.WalkSpeed), hum.MoveDirection.X, hum.MoveDirection.Y, hum.MoveDirection.Z))
-	end
+	print("[TrophyFarm] gave up walking to WinBlock" .. n .. " (60s timeout)")
 end
 
 -- ============================================================
@@ -274,19 +233,17 @@ Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
 
 local function refreshButton()
 	if Config.Enabled then
-		btn.Text = "RUN: ON (tap to stop)"
+		btn.Text = "STEP: ON (tap to stop)"
 		btn.BackgroundColor3 = Color3.fromRGB(40, 170, 90)
 	else
-		btn.Text = "RUN: OFF (tap to start)"
+		btn.Text = "STEP: OFF (tap to start)"
 		btn.BackgroundColor3 = Color3.fromRGB(170, 45, 45)
 	end
 end
 refreshButton()
 
 -- ============================================================
--- "GO TO #" INPUT: jump the auto-run's target straight to a WinBlock number
--- (still walks/runs there for real -- this only skips which waypoint it's
--- currently chasing, it never teleports).
+-- "GO TO #" INPUT: one-off manual walk to a specific WinBlock
 -- ============================================================
 local goRow = Instance.new("Frame")
 goRow.Name = "GoToRow"
@@ -327,6 +284,7 @@ goBtn.ZIndex = 2
 goBtn.Parent = goRow
 Instance.new("UICorner", goBtn).CornerRadius = UDim.new(0, 8)
 
+local walking = false
 local function goToWinBlock()
 	local n = tonumber(input.Text)
 	input.Text = ""
@@ -339,9 +297,13 @@ local function goToWinBlock()
 		input.PlaceholderText = "1-" .. MAX_WAYPOINT .. " only"
 		return
 	end
-	State.waypoint = n
-	State.lastProgressTime = tick()
-	print("[TrophyFarm] now heading for WinBlock" .. n)
+	if walking then return end
+	walking = true
+	task.spawn(function()
+		local ok, err = pcall(walkToWinBlock, n)
+		if not ok then warn("[TrophyFarm] walkToWinBlock error: " .. tostring(err)) end
+		walking = false
+	end)
 end
 goBtn.MouseButton1Click:Connect(goToWinBlock)
 input.FocusLost:Connect(function(enterPressed)
@@ -383,35 +345,31 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 btn.MouseButton1Click:Connect(function()
 	Config.Enabled = not Config.Enabled
+	if not Config.Enabled then
+		State.homeCFrame = nil -- re-anchor fresh next time it's turned on
+	end
 	refreshButton()
 end)
 
 task.spawn(function()
-	local lastTrophyFire = 0
 	while true do
 		if not Config.Enabled or State.dead then
 			task.wait(0.3)
 		else
-			local ok, err = pcall(autoRunStep)
+			local ok, err = pcall(stepFarmTick)
 			if not ok then
-				warn("[TrophyFarm] autoRunStep error: " .. tostring(err))
+				warn("[TrophyFarm] stepFarmTick error: " .. tostring(err))
+				task.wait(0.5)
 			end
-
-			if Config.UseTrophyPrompt and (tick() - lastTrophyFire) >= Config.TrophyPromptInterval then
-				pcall(fireHubTrophy)
-				lastTrophyFire = tick()
-			end
-
-			RunService.Heartbeat:Wait()
 		end
 	end
 end)
 
 getgenv().TrophyFarm = {
-	Stop = function() Config.Enabled = false; refreshButton() end,
+	Stop = function() Config.Enabled = false; State.homeCFrame = nil; refreshButton() end,
 	Start = function() Config.Enabled = true; refreshButton() end,
 	Config = Config,
 	State = State,
 }
 
-print("[TrophyFarm] started -- auto-running toward WinBlock1..WinBlock13 (real movement, no teleport). Tap the on-screen button (or call getgenv().TrophyFarm.Stop()) to pause.")
+print("[TrophyFarm] ready -- stand somewhere safe and tap STEP: OFF to start farming Wins per step. Use the GO box to manually walk to a specific WinBlock (1-13) once.")
