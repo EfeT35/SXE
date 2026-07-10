@@ -21,6 +21,9 @@ local Config = {
 	ArriveDistance = 10,      -- flat (XZ) distance considered "at" the waypoint
 	StuckTimeout = 8,         -- seconds with no touch + no progress before skipping ahead anyway
 	JumpInterval = 1.2,       -- min seconds between anti-stuck jumps
+	MoveSpeed = 250,          -- studs/sec driven directly via velocity (Humanoid:Move can get
+	                          -- overridden by the game's own control scripts if you aren't
+	                          -- actually touching the controls, so this is the primary driver)
 	UseTrophyPrompt = true,   -- also trigger the hub's x2 Wins prompt periodically
 	TrophyPromptInterval = 5, -- seconds between x2 Wins attempts
 }
@@ -96,6 +99,7 @@ local State = {
 	lastProgressTime = tick(),
 	lastJumpTime = 0,
 	lastPos = nil,
+	lastStatusPrint = 0,
 }
 local touchConnections = {}
 
@@ -161,12 +165,20 @@ local function autoRunStep()
 
 	local dir = toTarget.Unit
 	hum:Move(Vector3.new(dir.X, 0, dir.Z), false)
+	hrp.AssemblyLinearVelocity = Vector3.new(dir.X * Config.MoveSpeed, hrp.AssemblyLinearVelocity.Y, dir.Z * Config.MoveSpeed)
 
 	if flatDist > Config.ArriveDistance
 		and tick() - State.lastJumpTime > Config.JumpInterval
 		and hum:GetState() ~= Enum.HumanoidStateType.Freefall then
 		hum.Jump = true
 		State.lastJumpTime = tick()
+	end
+
+	if tick() - State.lastStatusPrint > 2 then
+		State.lastStatusPrint = tick()
+		print(string.format("[TrophyFarm] waypoint=%d flatDist=%.1f pos=(%.1f,%.1f,%.1f) WalkSpeed=%s MoveDir=(%.2f,%.2f,%.2f)",
+			State.waypoint, flatDist, hrp.Position.X, hrp.Position.Y, hrp.Position.Z,
+			tostring(hum.WalkSpeed), hum.MoveDirection.X, hum.MoveDirection.Y, hum.MoveDirection.Z))
 	end
 end
 
@@ -327,7 +339,10 @@ task.spawn(function()
 		if not Config.Enabled then
 			task.wait(0.3)
 		else
-			autoRunStep()
+			local ok, err = pcall(autoRunStep)
+			if not ok then
+				warn("[TrophyFarm] autoRunStep error: " .. tostring(err))
+			end
 
 			if Config.UseTrophyPrompt and (tick() - lastTrophyFire) >= Config.TrophyPromptInterval then
 				pcall(fireHubTrophy)
