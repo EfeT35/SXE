@@ -570,7 +570,7 @@ Keybinds = {
     Kick="Y",["Rejoin Job ID"]="J",Clone="F",["Manual TP"]="T",["Invisible Steal"]="U",
     ["Job ID"]="K",Proximity="P",["Carpet Boost"]="Q",["Open Menu"]="LeftControl",
     ["Ragdoll Self"]="R",["Drop Brainrot"]="G",Float="Z",Reset="X",["Auto Buy"]="K",
-    ["Click to AP"]="NONE"
+    ["Click to AP"]="NONE",["Speed Toggle"]="H"
 }
 
 priorityList = {
@@ -8061,6 +8061,48 @@ function makeKeybindRow(parent,nameText)
     end)
 end
 
+function makeSpeedPresetPicker(parent,text,presets,default,callback)
+    local row=Instance.new("Frame"); row.Size=UDim2.new(1,-4,0,90); row.BackgroundColor3=Theme.Panel; row.BackgroundTransparency=0.1; row.Parent=parent; corner(row,10); stroke(row,Theme.Stroke,1,0.4)
+
+    local dot=Instance.new("Frame"); dot.Size=UDim2.new(0,6,0,6); dot.Position=UDim2.new(0,10,0,10); dot.BackgroundColor3=Theme.Accent; dot.Parent=row; corner(dot,10)
+    local label=Instance.new("TextLabel"); label.Size=UDim2.new(1,-50,0,16); label.Position=UDim2.new(0,20,0,4); label.BackgroundTransparency=1; label.Text=text; label.TextColor3=Theme.Text; label.Font=Enum.Font.GothamBold; label.TextSize=11; label.TextXAlignment=Enum.TextXAlignment.Left; label.Parent=row
+    local collapseBtn=Instance.new("TextButton"); collapseBtn.Size=UDim2.new(0,20,0,20); collapseBtn.Position=UDim2.new(1,-26,0,2); collapseBtn.BackgroundTransparency=1; collapseBtn.Text="-"; collapseBtn.TextColor3=Theme.Dim; collapseBtn.Font=Enum.Font.GothamBold; collapseBtn.TextSize=16; collapseBtn.Parent=row
+
+    local content=Instance.new("Frame"); content.Size=UDim2.new(1,-16,0,62); content.Position=UDim2.new(0,8,0,24); content.BackgroundTransparency=1; content.Parent=row
+    local numberLabel=Instance.new("TextLabel"); numberLabel.Size=UDim2.new(1,-30,0,28); numberLabel.Position=UDim2.new(0,0,0,0); numberLabel.BackgroundTransparency=1; numberLabel.Text=tostring(default); numberLabel.TextColor3=Theme.Text; numberLabel.Font=Enum.Font.GothamBlack; numberLabel.TextSize=24; numberLabel.TextXAlignment=Enum.TextXAlignment.Center; numberLabel.Parent=content
+    local check=Instance.new("TextLabel"); check.Size=UDim2.new(0,22,0,22); check.Position=UDim2.new(1,-22,0,3); check.BackgroundTransparency=1; check.Text="✓"; check.TextColor3=Theme.Green; check.Font=Enum.Font.GothamBold; check.TextSize=16; check.Parent=content
+
+    local pillHolder=Instance.new("Frame"); pillHolder.Size=UDim2.new(1,0,0,28); pillHolder.Position=UDim2.new(0,0,0,32); pillHolder.BackgroundTransparency=1; pillHolder.Parent=content
+    local pillLayout=Instance.new("UIListLayout"); pillLayout.FillDirection=Enum.FillDirection.Horizontal; pillLayout.Padding=UDim.new(0,6); pillLayout.SortOrder=Enum.SortOrder.LayoutOrder; pillLayout.Parent=pillHolder
+
+    local pillW=1/#presets
+    local current=default
+    local pills={}
+    local function refresh()
+        numberLabel.Text=tostring(current)
+        for val,btn in pairs(pills) do
+            local sel=(val==current)
+            tw(btn,{BackgroundColor3=sel and Theme.Accent or Theme.SoftButton},0.12)
+            btn.TextColor3=sel and Color3.new(1,1,1) or Theme.Dim
+        end
+    end
+    for _,val in ipairs(presets) do
+        local pill=Instance.new("TextButton"); pill.Size=UDim2.new(pillW,-5,1,0); pill.AutoButtonColor=false; pill.BackgroundColor3=(val==default) and Theme.Accent or Theme.SoftButton; pill.Text=tostring(val); pill.TextColor3=(val==default) and Color3.new(1,1,1) or Theme.Dim; pill.Font=Enum.Font.GothamBold; pill.TextSize=12; pill.Parent=pillHolder; corner(pill,8)
+        pills[val]=pill
+        pill.MouseButton1Click:Connect(function() current=val; refresh(); if callback then callback(val) end end)
+    end
+
+    local collapsed=false
+    collapseBtn.MouseButton1Click:Connect(function()
+        collapsed=not collapsed
+        content.Visible=not collapsed
+        collapseBtn.Text=collapsed and "+" or "-"
+        tw(row,{Size=collapsed and UDim2.new(1,-4,0,28) or UDim2.new(1,-4,0,90)},0.15)
+    end)
+
+    return {set=function(v) current=v; refresh() end, get=function() return current end}
+end
+
 -- CREATE PANELS
 main,mainBody=makeMainPanel("SXE HUB PRIVAT",UDim2.new(0,375,0,480),UDim2.new(0.5,-187,0.5,-255))
 if Config.AutoCloseOnExec then main.Visible = false end
@@ -8181,8 +8223,10 @@ do
     -- WALKSPEED CONTROL (CFrame Bypass, min 15 max 29)
     regToggle("WalkSpeed", Config.WalkSpeedEnabled)
     makeSyncStateRow(panels["InvisStealBody"],"WalkSpeed:","WalkSpeed",function(on) setWalkSpeedEnabled(on) end)
-    makeMainSliderWithInput(panels["InvisStealBody"], "Walk Speed", 15, 29, Config.WalkSpeedValue or 16, function(v)
-        local clamped = setWalkSpeedValue(v)
+    local initSpeed = Config.WalkSpeedValue
+    if initSpeed ~= 24 and initSpeed ~= 28 then initSpeed = 24 end
+    _G.SpeedPickerAPI = makeSpeedPresetPicker(panels["InvisStealBody"], "Speed (H)", {24, 28}, initSpeed, function(v)
+        setWalkSpeedValue(v)
     end)
     if Config.WalkSpeedEnabled then
         task.defer(function() setWalkSpeedEnabled(true) end)
@@ -8958,7 +9002,7 @@ function loadTab(tabName)
 
     if tabName=="Keybinds" then
         -- NO Steal Speed keybind, NO Unwalk
-        for _,name in ipairs({"Kick","Rejoin Job ID","Clone","Manual TP","Invisible Steal","Job ID","Proximity","Carpet Boost","Open Menu","Ragdoll Self","Drop Brainrot","Float","Reset","Auto Buy","Click to AP"}) do makeKeybindRow(mainBody,name) end
+        for _,name in ipairs({"Kick","Rejoin Job ID","Clone","Manual TP","Invisible Steal","Job ID","Proximity","Carpet Boost","Open Menu","Ragdoll Self","Drop Brainrot","Float","Reset","Auto Buy","Click to AP","Speed Toggle"}) do makeKeybindRow(mainBody,name) end
 
     elseif tabName=="Auto TP" then
         makeMainToggle(mainBody,"Auto TP Priority Mode",Config.AutoTPPriority,function(on)
@@ -9558,6 +9602,12 @@ UIS.InputBegan:Connect(function(input,gp) if gp then return end; if input.UserIn
             setToggle("Click to AP", Config.ClickToAP)
             setToggle("ClickToAP", Config.ClickToAP)
             ShowNotification("CLICK TO AP", Config.ClickToAP and "Enabled" or "Disabled")
+        end,
+        ["Speed Toggle"]=function()
+            local cur = Config.WalkSpeedValue or 24
+            local nxt = (cur == 24) and 28 or 24
+            setWalkSpeedValue(nxt)
+            if _G.SpeedPickerAPI then _G.SpeedPickerAPI.set(nxt) end
         end,
     }
     for actionName,keyBind in pairs(Keybinds) do if keyBind==kn and actions[actionName] then actions[actionName](); return end end
