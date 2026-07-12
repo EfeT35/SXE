@@ -5430,7 +5430,11 @@ function runAutoSnipe()
                 end
             end
             
-            -- Keep velocity zero and CFrame glued to target animal for steal duration
+            -- Keep velocity zero for the steal duration. 2nd floor targets hold their ground
+            -- position (grabbed from below) instead of snapping the CFrame up to the BrainRot's
+            -- real elevated position -- that snap was the last thing still visibly moving the
+            -- player up to the 2nd floor after the ground-TP + clone.
+            local holdPos = hrp.Position
             local holdEnd = tick() + math.max(0.18, Config.TpSettings.DelayVal or 0.4)
             while tick() < holdEnd do
                 if not hrp.Parent then
@@ -5442,40 +5446,20 @@ function runAutoSnipe()
                 hrp.AssemblyLinearVelocity = Vector3.zero
                 hrp.AssemblyAngularVelocity = Vector3.zero
                 pcall(function()
-                    hrp.CFrame = CFrame.new(targetPart.Position)
+                    hrp.CFrame = CFrame.new(isSecondFloor and holdPos or targetPart.Position)
                 end)
                 RunService.Heartbeat:Wait()
             end
-            
-            -- Post-steal stabilization / platform fallback
-            if isSecondFloor then
-                local plat = Instance.new("Part")
-                plat.Name = "XiTempPlatform"
-                plat.Size = Vector3.new(6, 1.5, 6)
-                plat.Position = Vector3.new(hrp.Position.X, hrp.Position.Y - 5.5, hrp.Position.Z)
-                plat.Color = Color3.fromRGB(232, 111, 177)
-                plat.Material = Enum.Material.Neon
-                plat.Anchored = true
-                plat.CanCollide = false; pcall(makeOneWay, plat)
-                plat.Transparency = 0.3
-                plat.Parent = Workspace
-                task.spawn(function()
-                    local start = tick()
-                    while (tick() - start) < 20 do
-                        if LocalPlayer:GetAttribute("Stealing") then break end
-                        task.wait(0.1)
-                    end
-                    plat:Destroy()
-                end)
-            else
-                for i = 1, 5 do
-                    if LocalPlayer:GetAttribute("Stealing") then break end
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    if (hrp.Position - targetPart.Position).Magnitude > 3 then
-                        hrp.CFrame = CFrame.new(targetPart.Position)
-                    end
-                    task.wait(0.05)
+
+            -- Post-steal stabilization: stay grounded and re-center on the hold position if pushed off.
+            for i = 1, 5 do
+                if LocalPlayer:GetAttribute("Stealing") then break end
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                local anchor = isSecondFloor and holdPos or targetPart.Position
+                if (hrp.Position - anchor).Magnitude > 3 then
+                    hrp.CFrame = CFrame.new(anchor)
                 end
+                task.wait(0.05)
             end
         -- Force equip the configured TP tool (not the cloner)
         pcall(function() hum:UnequipTools() end)
