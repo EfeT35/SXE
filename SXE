@@ -5347,10 +5347,8 @@ function runAutoSnipe()
             end
             local initialDist = (hrp.Position - tpPos).Magnitude
             isCloseBase = (initialDist <= 100) and isSecondFloor
-            if Config.TpSettings.FlyTP then
+            if Config.TpSettings.FlyTP and not isSecondFloor then
                 -- Fly directly to the target base position (tpPos) facing LEFT, with obstacle avoidance.
-                -- Stay at ground level even for 2nd floor targets (no more rising) -- this reuses the
-                -- 1st floor's TP logic and the BrainRot ends up grabbed from below.
                 flyForwardTo(hrp, tpPos, LEFT, nil, isCloseBase and (Config.TpSettings.FlyTPCloseSpeed or 75) or nil)
             else
                 -- Teleport directly to the target base position (tpPos) facing LEFT
