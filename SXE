@@ -5348,8 +5348,10 @@ function runAutoSnipe()
             local initialDist = (hrp.Position - tpPos).Magnitude
             isCloseBase = (initialDist <= 100) and isSecondFloor
             if Config.TpSettings.FlyTP then
-                -- Fly directly to the target base position (tpPos) facing LEFT, with obstacle avoidance
-                flyForwardTo(hrp, tpPos, LEFT, isSecondFloor and (signPart.Position.Y + 4) or nil, isCloseBase and (Config.TpSettings.FlyTPCloseSpeed or 75) or nil)
+                -- Fly directly to the target base position (tpPos) facing LEFT, with obstacle avoidance.
+                -- Rise to the BrainRot's actual height (exactPos.Y), not a fixed "2nd floor" offset from the
+                -- sign -- a fixed offset undershoots on the 3rd floor and grabs the pet from below.
+                flyForwardTo(hrp, tpPos, LEFT, isSecondFloor and (exactPos.Y - 1) or nil, isCloseBase and (Config.TpSettings.FlyTPCloseSpeed or 75) or nil)
             else
                 -- Teleport directly to the target base position (tpPos) facing LEFT
                 if hum and hum.Parent then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
@@ -5377,10 +5379,12 @@ function runAutoSnipe()
             end, 0.5)
             task.wait(0.05)
 
-            if isSecondFloor and hrp.Position.Y < (signPart.Position.Y + 2) then
-                -- Smooth and slow fly up at a safe distance (tpPos is 15-20 studs away)
+            if isSecondFloor and hrp.Position.Y < (exactPos.Y - 3) then
+                -- Smooth and slow fly up at a safe distance (tpPos is 15-20 studs away).
+                -- Target the BrainRot's real height instead of a fixed sign-relative offset,
+                -- so this also rises correctly on the 3rd floor (and beyond), not just the 2nd.
                 local startY = hrp.Position.Y
-                local targetY = signPart.Position.Y + 4
+                local targetY = exactPos.Y - 1
                 local riseTime = isCloseBase and 5.0 or 1.2
                 local elapsed = 0
                 while elapsed < riseTime and hrp.Parent do
