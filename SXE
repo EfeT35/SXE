@@ -5349,9 +5349,9 @@ function runAutoSnipe()
             isCloseBase = (initialDist <= 100) and isSecondFloor
             if Config.TpSettings.FlyTP then
                 -- Fly directly to the target base position (tpPos) facing LEFT, with obstacle avoidance.
-                -- Rise to the BrainRot's actual height (exactPos.Y), not a fixed "2nd floor" offset from the
-                -- sign -- a fixed offset undershoots on the 3rd floor and grabs the pet from below.
-                flyForwardTo(hrp, tpPos, LEFT, isSecondFloor and (exactPos.Y - 1) or nil, isCloseBase and (Config.TpSettings.FlyTPCloseSpeed or 75) or nil)
+                -- Stay at ground level even for 2nd floor targets (no more rising) -- this reuses the
+                -- 1st floor's TP logic and the BrainRot ends up grabbed from below.
+                flyForwardTo(hrp, tpPos, LEFT, nil, isCloseBase and (Config.TpSettings.FlyTPCloseSpeed or 75) or nil)
             else
                 -- Teleport directly to the target base position (tpPos) facing LEFT
                 if hum and hum.Parent then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
@@ -5379,39 +5379,15 @@ function runAutoSnipe()
             end, 0.5)
             task.wait(0.05)
 
-            if isSecondFloor and hrp.Position.Y < (exactPos.Y - 3) then
-                -- Smooth and slow fly up at a safe distance (tpPos is 15-20 studs away).
-                -- Target the BrainRot's real height instead of a fixed sign-relative offset,
-                -- so this also rises correctly on the 3rd floor (and beyond), not just the 2nd.
-                local startY = hrp.Position.Y
-                local targetY = exactPos.Y - 1
-                local riseTime = isCloseBase and 5.0 or 1.2
-                local elapsed = 0
-                while elapsed < riseTime and hrp.Parent do
-                    elapsed = elapsed + RunService.Heartbeat:Wait()
-                    local t = math.min(elapsed / riseTime, 1)
-                    local currentY = startY + (targetY - startY) * t
-                    hrp.CFrame = CFrame.lookAt(Vector3.new(tpPos.X, currentY, tpPos.Z), Vector3.new(tpPos.X, currentY, tpPos.Z) + LEFT)
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                end
-                hrp.CFrame = CFrame.lookAt(Vector3.new(tpPos.X, targetY, tpPos.Z), Vector3.new(tpPos.X, targetY, tpPos.Z) + LEFT)
-                hrp.AssemblyLinearVelocity = Vector3.zero
-            end
+            -- 2nd floor targets now reuse the 1st floor's TP logic instead of flying up to the
+            -- BrainRot's height: stay on the ground point (tpPos) and grab the BrainRot from below.
             if isSecondFloor or not _G._isTargetPlotUnlocked(targetPetData.plot) then
                 prepMiniTpTool(hum, hrp)
                 waitSecondsHeartbeat(0.05)
-                if isSecondFloor then
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    waitSecondsHeartbeat(0.01)
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    hrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -2.5)
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                else
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    hrp.AssemblyLinearVelocity = Vector3.zero
-                    waitSecondsHeartbeat(0.03)
-                    walkForward(0.1)
-                end
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                waitSecondsHeartbeat(0.03)
+                walkForward(0.1)
                 waitSecondsHeartbeat(Config.TpSettings.CloneDelayVal or 0.1)
                 local miniPos = hrp.Position
                 waitSecondsHeartbeat(0.01)
