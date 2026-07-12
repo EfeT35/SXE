@@ -5308,7 +5308,13 @@ function runAutoSnipe()
         local carpet = LocalPlayer.Backpack:FindFirstChild(carpetName) or char:FindFirstChild(carpetName)
         local cloner = LocalPlayer.Backpack:FindFirstChild("Quantum Cloner") or char:FindFirstChild("Quantum Cloner")
         equipTpToolAndWait(hum)
-        local isSecondFloor = exactPos.Y > 10
+        -- 3rd floor targets land at the 2nd floor's height instead of the ground, then get
+        -- grabbed from below the same way 2nd floor targets are grabbed from the ground --
+        -- same technique, one floor up.
+        local isThirdFloor = exactPos.Y > 23.15
+        local isSecondFloor = exactPos.Y > 10 and not isThirdFloor
+        local isElevated = isSecondFloor or isThirdFloor
+        local groundY = isThirdFloor and 14.5 or -4.8
         local isCloseBase = false
         
         local signPart = getClosestBaseSign(targetPart)
@@ -5333,7 +5339,7 @@ function runAutoSnipe()
                 local distFront = (Vector3.new(frontPoint.X, 0, frontPoint.Z) - Vector3.new(myPos.X, 0, myPos.Z)).Magnitude
                 local distBack = (Vector3.new(backPoint.X, 0, backPoint.Z) - Vector3.new(myPos.X, 0, myPos.Z)).Magnitude
                 local chosen = ((distFront < distBack) and frontPoint) or backPoint
-                tpPos = Vector3.new(chosen.X, -4.8, chosen.Z)
+                tpPos = Vector3.new(chosen.X, groundY, chosen.Z)
             else
                 local backPoint = signPart.Position + (BACK * 20)
                 local frontPoint = signPart.Position + (FORWARD * 20)
@@ -5343,11 +5349,11 @@ function runAutoSnipe()
                 local distFront = (Vector3.new(frontPoint.X, 0, frontPoint.Z) - myFlat).Magnitude
                 local chosen = ((distBack < distFront) and backPoint) or frontPoint
                 -- Always ground level Y
-                tpPos = Vector3.new(chosen.X, -4.8, chosen.Z)
+                tpPos = Vector3.new(chosen.X, groundY, chosen.Z)
             end
             local initialDist = (hrp.Position - tpPos).Magnitude
-            isCloseBase = (initialDist <= 100) and isSecondFloor
-            if Config.TpSettings.FlyTP and not isSecondFloor then
+            isCloseBase = (initialDist <= 100) and isElevated
+            if Config.TpSettings.FlyTP and not isElevated then
                 -- Fly directly to the target base position (tpPos) facing LEFT, with obstacle avoidance.
                 flyForwardTo(hrp, tpPos, LEFT, nil, isCloseBase and (Config.TpSettings.FlyTPCloseSpeed or 75) or nil)
             else
@@ -5377,9 +5383,9 @@ function runAutoSnipe()
             end, 0.5)
             task.wait(0.05)
 
-            -- 2nd floor targets now reuse the 1st floor's TP logic instead of flying up to the
-            -- BrainRot's height: stay on the ground point (tpPos) and grab the BrainRot from below.
-            if isSecondFloor or not _G._isTargetPlotUnlocked(targetPetData.plot) then
+            -- 2nd/3rd floor targets now reuse the floor-below's TP logic instead of flying up to
+            -- the BrainRot's height: stay on the landing point (tpPos) and grab it from below.
+            if isElevated or not _G._isTargetPlotUnlocked(targetPetData.plot) then
                 prepMiniTpTool(hum, hrp)
                 waitSecondsHeartbeat(0.05)
                 hrp.AssemblyLinearVelocity = Vector3.zero
@@ -5444,7 +5450,7 @@ function runAutoSnipe()
                 hrp.AssemblyLinearVelocity = Vector3.zero
                 hrp.AssemblyAngularVelocity = Vector3.zero
                 pcall(function()
-                    hrp.CFrame = CFrame.new(isSecondFloor and holdPos or targetPart.Position)
+                    hrp.CFrame = CFrame.new(isElevated and holdPos or targetPart.Position)
                 end)
                 RunService.Heartbeat:Wait()
             end
@@ -5453,7 +5459,7 @@ function runAutoSnipe()
             for i = 1, 5 do
                 if LocalPlayer:GetAttribute("Stealing") then break end
                 hrp.AssemblyLinearVelocity = Vector3.zero
-                local anchor = isSecondFloor and holdPos or targetPart.Position
+                local anchor = isElevated and holdPos or targetPart.Position
                 if (hrp.Position - anchor).Magnitude > 3 then
                     hrp.CFrame = CFrame.new(anchor)
                 end
@@ -5482,47 +5488,51 @@ function runAutoSnipe()
             task.wait(0.3) -- slightly delay starting carpet speed to brainrot for close bases to avoid anti-cheat flag
         end
         
-        -- Walk to brainrot with Carpet Speed instead of direct teleport
+        -- Walk to brainrot with Carpet Speed instead of direct teleport.
+        -- Elevated (2nd/3rd floor) targets skip this entirely and stay at their landing point --
+        -- this whole block used to walk/rise the player the rest of the way up to the BrainRot's
+        -- real position regardless of floor, undoing the ground-hold logic above it.
+        if not isElevated then
         local targetBrainrotPos = targetPart.Position
         local distToBrainrot = (hrp.Position - targetBrainrotPos).Magnitude
-        
+
         if distToBrainrot > 3 then
             -- Equip carpet and walk there with carpet speed
             local toolName = Config.TpSettings.Tool or "Flying Carpet"
             local tool = LocalPlayer.Backpack:FindFirstChild(toolName) or char:FindFirstChild(toolName)
             if tool and tool.Parent ~= char then hum:EquipTool(tool); task.wait(0.02) end
-            
+
             local walkTimeout = os.clock()
             local WALK_SPEED = 190
-            
+
             while hrp.Parent and (os.clock() - walkTimeout) < 8 do
                 if LocalPlayer:GetAttribute("Stealing") then break end
                 local brPos = targetPart.Position
                 local diff = Vector3.new(brPos.X - hrp.Position.X, 0, brPos.Z - hrp.Position.Z)
                 local flatDist = diff.Magnitude
-                
+
                 local verticalDiff = brPos.Y - hrp.Position.Y
                 if flatDist < 3 and math.abs(verticalDiff) < 8 then break end
-                
+
                 local moveDir = (flatDist > 0.1) and diff.Unit or Vector3.zero
                 local yVel = hrp.AssemblyLinearVelocity.Y
-                
+
                 -- Handle vertical: if brainrot is above, rise up smoothly
                 if verticalDiff > 2 then
                     yVel = math.clamp(verticalDiff * 7, 30, 60)
                 elseif verticalDiff < -2 then
                     yVel = math.clamp(verticalDiff * 4, -80, 0)
                 end
-                
+
                 local currentWalkSpeed = WALK_SPEED
                 if flatDist < 3 then currentWalkSpeed = 0 end
-                
+
                 hrp.AssemblyLinearVelocity = Vector3.new(moveDir.X * currentWalkSpeed, yVel, moveDir.Z * currentWalkSpeed)
                 RunService.Heartbeat:Wait()
             end
             hrp.AssemblyLinearVelocity = Vector3.zero
         end
-        
+
         -- Final positioning near brainrot
         local verticalDiff = targetPart.Position.Y - hrp.Position.Y
         if verticalDiff > 2 then
@@ -5537,7 +5547,7 @@ function runAutoSnipe()
             plat.CanCollide = false; pcall(makeOneWay, plat)
             plat.Transparency = 0.3
             plat.Parent = Workspace
-            
+
             -- Smooth CFrame Lerp to prevent anti-cheat triggers and flinging
             local startCF = hrp.CFrame
             local targetCF = CFrame.new(airPos)
@@ -5570,6 +5580,7 @@ function runAutoSnipe()
                 end
                 task.wait(0.05)
             end
+        end
         end
     end)
     _G._isTpMoving = false
@@ -10458,9 +10469,10 @@ do
         end
         local h = petPos.Y
         local targetY = hrp.Position.Y
-        -- 2nd floor now targets ground level too (-4), same as 1st floor -- grabbed from below,
-        -- instead of walking/floating up toward the BrainRot's real elevated height.
-        if h > 23.15 then targetY = 21
+        -- Each elevated floor targets the floor below's height instead of its own real height:
+        -- 2nd floor -> ground (-4, same as 1st floor), 3rd floor -> 2nd floor's height (14.5).
+        -- Grabbed from below in both cases.
+        if h > 23.15 then targetY = 14.5
         elseif h >= 11 and h <= 23.15 then targetY = -4
         elseif h >= -6.9 and h <= 8.9 then targetY = -4 end
         local _to = Vector3.new(petPos.X, targetY, petPos.Z)
