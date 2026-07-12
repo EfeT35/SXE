@@ -10458,8 +10458,10 @@ do
         end
         local h = petPos.Y
         local targetY = hrp.Position.Y
+        -- 2nd floor now targets ground level too (-4), same as 1st floor -- grabbed from below,
+        -- instead of walking/floating up toward the BrainRot's real elevated height.
         if h > 23.15 then targetY = 21
-        elseif h >= 11 and h <= 23.15 then targetY = 14.5
+        elseif h >= 11 and h <= 23.15 then targetY = -4
         elseif h >= -6.9 and h <= 8.9 then targetY = -4 end
         local _to = Vector3.new(petPos.X, targetY, petPos.Z)
         if Config.TpSettings and Config.TpSettings.BrainrotCarpet then
