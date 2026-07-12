@@ -10861,8 +10861,9 @@ do
             return
         end
 
-        -- FIRST FLOOR
-        if petPos.Y <= 8.9 and isPlotUnlocked(pet.plot) then
+        -- FIRST FLOOR (also covers 2nd floor targets: reuse the ground-level TP instead of
+        -- flying up to the sky landing point -- the BrainRot ends up grabbed from below).
+        if petPos.Y <= 23.15 and isPlotUnlocked(pet.plot) then
             local maxHP = hum.MaxHealth
             hum.Health = maxHP
             local healConn = RunService.Heartbeat:Connect(function()
